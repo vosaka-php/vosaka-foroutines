@@ -19,6 +19,13 @@ In the main VOsaka version you can see simple syntax and memory optimization thr
 - ext-fileinfo
 - ext-zlib
 
+# Installation
+You can install the library using Composer. Run the following command in your terminal:
+
+```bash
+composer require venndev/vosaka-fourotines
+```
+
 # Example
 ```php
 use vosaka\foroutines\Async;
