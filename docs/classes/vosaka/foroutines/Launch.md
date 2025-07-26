@@ -132,13 +132,13 @@ private static makeLaunch(callable|\Generator|\vosaka\foroutines\Async|\venndev\
 
 ### cancel
 
-
+Cancels the task associated with this Launch instance.
 
 ```php
 public cancel(): void
 ```
 
-
+If the task is still running, it will be removed from the queue.
 
 
 
@@ -153,13 +153,13 @@ public cancel(): void
 
 ### runOnce
 
-
+Runs the next task in the queue if available.
 
 ```php
 public static runOnce(): void
 ```
 
-
+This method should be called periodically to ensure that tasks are executed.
 
 * This method is **static**.
 

@@ -52,6 +52,10 @@ final class Launch
         return new self($childScope->id);
     }
 
+    /**
+     * Cancels the task associated with this Launch instance.
+     * If the task is still running, it will be removed from the queue.
+     */
     public function cancel(): void
     {
         if (isset(self::$queue[$this->id])) {
@@ -59,6 +63,10 @@ final class Launch
         }
     }
 
+    /**
+     * Runs the next task in the queue if available.
+     * This method should be called periodically to ensure that tasks are executed.
+     */
     public static function runOnce(): void
     {
         if (count(Launch::$queue) > 0) {
