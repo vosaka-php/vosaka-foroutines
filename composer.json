@@ -1,0 +1,25 @@
+{
+    "name": "venndev/vosaka-fourotines",
+    "description": "The library makes it easy to include Kotlin-oriented syntax in PHP asynchronous programming. Can integrate with VOsaka.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "vosaka\\foroutines\\": "src/vosaka/foroutines/"
+        }
+    },
+    "authors": [
+        {
+            "name": "VennV",
+            "email": "hyplex9009@gmail.com"
+        }
+    ],
+    "require": {
+        "venndev/v-osaka": "^1.9",
+        "symfony/process": "^7.3",        
+        "laravel/serializable-closure": "^2.0",
+        "ext-shmop": "*",
+        "ext-fileinfo": "*",
+        "ext-zlib": "*"
+    }
+}
