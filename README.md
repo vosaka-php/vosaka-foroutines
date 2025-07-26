@@ -1,5 +1,6 @@
 # VOsaka Foroutines
 This is a library for writing asynchronous code in a more structured way, using the concept of "foroutines" (fiber + coroutines).
+This is further improvements to the library [async-php](https://github.com/terremoth/php-async)
 
 # Features
 - **Structured Concurrency**: Foroutines allow you to write asynchronous code that is easier to reason about and maintain.
