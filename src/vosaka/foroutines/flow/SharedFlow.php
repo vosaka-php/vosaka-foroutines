@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace vosaka\foroutines;
+namespace vosaka\foroutines\flow;
 
 use Throwable;
 
@@ -38,13 +38,11 @@ final class SharedFlow extends BaseFlow
             return;
         }
 
-        // Store for replay
         $this->emittedValues[] = $value;
         if (count($this->emittedValues) > $this->replay) {
             array_shift($this->emittedValues);
         }
 
-        // Emit to all active collectors
         foreach ($this->collectors as $key => $collectorInfo) {
             try {
                 $processedValue = $this->applyOperatorsForCollector($value, $collectorInfo);
@@ -67,7 +65,6 @@ final class SharedFlow extends BaseFlow
         $emittedCount = 0;
         $skippedCount = 0;
 
-        // Store collector info
         $this->collectors[$collectorKey] = [
             'callback' => $collector,
             'emittedCount' => 0,
@@ -75,7 +72,6 @@ final class SharedFlow extends BaseFlow
             'operators' => $this->operators
         ];
 
-        // Replay previous values
         foreach ($this->emittedValues as $value) {
             try {
                 $processedValue = $this->applyOperators($value, $emittedCount, $skippedCount);

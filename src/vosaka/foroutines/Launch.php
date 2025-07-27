@@ -22,7 +22,7 @@ final class Launch extends Job
      */
     public static array $queue = [];
 
-    private function __construct(private int $id)
+    public function __construct(public int $id = 0)
     {
         parent::__construct($id);
     }
@@ -45,6 +45,15 @@ final class Launch extends Job
             };
             return self::makeLaunch($callable);
         }
+
+        if ($dispatcher === Dispatchers::MAIN) {
+            $callable = function () use ($callable) {
+                $result = Async::new($callable, Dispatchers::MAIN);
+                return $result->wait();
+            };
+            return self::makeLaunch($callable);
+        }
+
         return self::makeLaunch($callable);
     }
 
@@ -79,6 +88,12 @@ final class Launch extends Job
         if (count(Launch::$queue) > 0) {
             $job = array_shift(Launch::$queue);
             $fiber = $job->fiber;
+
+            if ($job->isTimedOut()) {
+                $job->cancel();
+                unset(Launch::$queue[$job->id]);
+                return;
+            }
 
             if ($job->isFinal()) {
                 unset(Launch::$queue[$job->id]);

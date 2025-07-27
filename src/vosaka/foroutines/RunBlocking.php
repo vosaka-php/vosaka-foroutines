@@ -6,6 +6,7 @@ namespace vosaka\foroutines;
 
 use Fiber;
 use Generator;
+use venndev\vosaka\core\Result;
 
 /**
  * RunBlocking is a utility class that allows you to run multiple fibers synchronously
@@ -20,27 +21,30 @@ final class RunBlocking
      * @param callable|Generator|Async|Fiber ...$fiber The fibers to run.
      * @return array The results of the completed fibers.
      */
-    public static function new(callable|Generator|Async|Fiber ...$fiber): array
-    {
-        $results = [];
-        while (count($fiber) > 0) {
-            $item = array_shift($fiber);
-            if (!$item instanceof Fiber) {
-                $item = FiberUtils::makeFiber($item);
-            }
-
-            if (!$item->isStarted()) {
-                $item->start();
-            }
-
-            if (!FiberUtils::fiberStillRunning($item)) {
-                $results[] = $item->getReturn();
-            } else {
-                $item->resume();
-                $fiber[] = $item; // Re-add the fiber to the end of the queue
-            }
+    public static function new(
+        callable|Generator|Async|Result|Fiber $callable,
+        Dispatchers $dispatchers = Dispatchers::DEFAULT
+    ): void {
+        if ($dispatchers === Dispatchers::IO) {
+            WorkerPool::addAsync($callable);
+            return;
         }
 
-        return $results;
+        if (!$callable instanceof Fiber) {
+            $callable = FiberUtils::makeFiber($callable);
+        }
+
+        if ($dispatchers === Dispatchers::MAIN) {
+            EventLoop::add($callable);
+            return;
+        }
+
+        if (!$callable->isStarted()) {
+            $callable->start();
+        }
+
+        while (FiberUtils::fiberStillRunning($callable)) {
+            $callable->resume();
+        }
     }
 }

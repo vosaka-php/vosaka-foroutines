@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace vosaka\foroutines;
+namespace vosaka\foroutines\flow;
 
 /**
  * Base interface for all Flow types

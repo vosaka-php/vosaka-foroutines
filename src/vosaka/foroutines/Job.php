@@ -17,6 +17,7 @@ class Job
     private JobState $status;
     private array $joins = [];
     private array $invokers = [];
+    private ?float $timeout = null;
 
     public function __construct(public int $id)
     {
@@ -179,5 +180,21 @@ class Job
             $callback($this);
         }
         $this->invokers = [];
+    }
+
+    public function cancelAfter(float $seconds): void
+    {
+        if ($this->isFinal()) {
+            throw new RuntimeException('Cannot set timeout for a job that has already completed.');
+        }
+        $this->timeout = $seconds;
+    }
+
+    public function isTimedOut(): bool
+    {
+        if ($this->timeout === null) {
+            return false;
+        }
+        return (microtime(true) - $this->startTime) >= $this->timeout;
     }
 }

@@ -56,13 +56,22 @@ $data = stringFromMemoryBlock($dataCompressed);
  */
 $serializedClosure = unserialize($data);
 $closure = $serializedClosure->getClosure();
-$result = $closure();
-if ($result instanceof Generator) {
-    foreach ($result as $value) {
-        // Process each yielded value if needed
+ob_start();
+try {
+    $result = $closure();
+    if ($result instanceof Generator) {
+        foreach ($result as $value) {
+            // Process each yielded value if needed
+        }
+        $result = $result->getReturn();
     }
-    $result = $result->getReturn();
+} catch (Throwable $e) {
+    $result = [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+    ];
 }
+ob_end_clean();
 echo base64_encode(serialize($result));
 
 exit(0);

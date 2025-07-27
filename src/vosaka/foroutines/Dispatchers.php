@@ -8,7 +8,8 @@ enum Dispatchers
 {
     // Dispatchers for asynchronous tasks
     case DEFAULT;
-
         // Dispatchers for I/O-bound tasks, call another thread to handle the task
     case IO;
+        // Dispatchers for CPU-bound tasks, run the task in the main thread
+    case MAIN;
 }

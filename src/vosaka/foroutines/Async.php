@@ -17,7 +17,7 @@ use venndev\vosaka\core\Result;
 final class Async
 {
     public function __construct(
-        public readonly Fiber $fiber
+        public Fiber $fiber
     ) {}
 
     /**
@@ -35,8 +35,13 @@ final class Async
             return WorkerPool::addAsync($callable);
         }
 
+        if ($dispatcher === Dispatchers::MAIN) {
+            $fiber = FiberUtils::makeFiber($callable);
+            EventLoop::add($fiber);
+            return new self($fiber);
+        }
+
         $fiber = FiberUtils::makeFiber($callable);
-        $fiber->start();
         return new self($fiber);
     }
 

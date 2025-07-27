@@ -6,7 +6,7 @@ use vosaka\foroutines\Async;
 use vosaka\foroutines\Dispatchers;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\RunBlocking;
-use vosaka\foroutines\Sleep;
+use vosaka\foroutines\Delay;
 
 // This function simulates an asynchronous
 // Dispatchers::IO operation that open new thread
@@ -24,12 +24,12 @@ $time = microtime(true);
 
 RunBlocking::new(function () {
     Launch::new(function () {
-        Sleep::new(3);
+        Delay::new(3);
         var_dump('Async 2 completed');
     });
 
     Launch::new(function (): Generator {
-        Sleep::new(1);
+        Delay::new(1);
         var_dump('Generator 1 completed');
         return yield 20;
     });
@@ -39,7 +39,7 @@ RunBlocking::new(function () {
     var_dump('Result from main:', $result);
 });
 
-Sleep::new(2);
+Delay::new(2);
 
 var_dump('Total execution time:', microtime(true) - $time);
 var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');

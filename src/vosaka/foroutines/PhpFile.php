@@ -4,8 +4,8 @@ namespace vosaka\foroutines;
 
 use Exception;
 use InvalidArgumentException;
+use vosaka\foroutines\Delay;
 use Symfony\Component\Process\Process as SymfonyProcess;
-use vosaka\foroutines\Sleep;
 
 /**
  * Class PhpFile
@@ -46,7 +46,7 @@ readonly class PhpFile
         });
     }
 
-    private function runOnWindows(): string
+    private function runOnWindows(): mixed
     {
         $command = [PHP_BINARY, $this->file, ...$this->args];
         $process = new SymfonyProcess($command);
@@ -64,7 +64,7 @@ readonly class PhpFile
             $fullOutput .= $newOutput;
             $fullError .= $newError;
 
-            Sleep::new(0.05);
+            Delay::new(0.05);
         }
 
         $remainingOutput = $process->getIncrementalOutput();
@@ -84,7 +84,7 @@ readonly class PhpFile
         return unserialize(base64_decode(trim($fullOutput)));
     }
 
-    private function runOnUnix(): string
+    private function runOnUnix(): mixed
     {
         $escapedFile = escapeshellarg($this->file);
         $escapedArgs = array_map('escapeshellarg', $this->args);
@@ -93,18 +93,43 @@ readonly class PhpFile
         $tempFile = tempnam(sys_get_temp_dir(), 'php_async_');
         $errorFile = tempnam(sys_get_temp_dir(), 'php_async_error_');
 
-        $command = PHP_BINARY . ' ' . $escapedFile . ' ' . $argsString . ' > ' . escapeshellarg($tempFile) . ' 2> ' . escapeshellarg($errorFile) . ' & echo $!';
+        $command = 'setsid ' . PHP_BINARY . ' ' . $escapedFile . ' ' . $argsString
+            . ' > ' . escapeshellarg($tempFile)
+            . ' 2> ' . escapeshellarg($errorFile) . ' & echo $!';
 
         $pidOutput = [];
         exec($command, $pidOutput);
         $pid = !empty($pidOutput) ? (int)$pidOutput[0] : null;
 
         if ($pid === null) {
+            if (file_exists($tempFile)) unlink($tempFile);
+            if (file_exists($errorFile)) unlink($errorFile);
             throw new Exception('Failed to start process');
         }
 
+        $cleanup = function () use ($pid, $tempFile, $errorFile) {
+            if ($pid && posix_kill($pid, 0)) {
+                posix_kill(-$pid, SIGTERM);
+                sleep(2);
+                if (posix_kill($pid, 0)) {
+                    posix_kill(-$pid, SIGKILL);
+                }
+            }
+            if (file_exists($tempFile)) unlink($tempFile);
+            if (file_exists($errorFile)) unlink($errorFile);
+        };
+
+        register_shutdown_function($cleanup);
+
+        $startTime = time();
+        $timeout = 3600; // 1 hour timeout
+
         while (posix_kill($pid, 0)) {
-            Sleep::new(0.05);
+            if (time() - $startTime > $timeout) {
+                $cleanup();
+                throw new Exception("Process timeout after {$timeout} seconds");
+            }
+            Delay::new(0.05);
         }
 
         $output = file_exists($tempFile) ? file_get_contents($tempFile) : '';
@@ -117,7 +142,21 @@ readonly class PhpFile
             throw new Exception("Process failed: {$error}");
         }
 
-        return unserialize(base64_decode(trim($output)));
+        if (empty($output)) {
+            throw new Exception("No output received from process");
+        }
+
+        $decodedOutput = base64_decode(trim($output));
+        if ($decodedOutput === false) {
+            throw new Exception("Failed to decode base64 output");
+        }
+
+        $result = @unserialize($decodedOutput);
+        if ($result === false && $decodedOutput !== serialize(false)) {
+            throw new Exception("Failed to unserialize output");
+        }
+
+        return $result;
     }
 
     /**
@@ -165,7 +204,7 @@ readonly class PhpFile
                 }
 
                 if ($status['running']) {
-                    Sleep::new(0.05);
+                    Delay::new(0.05);
                 }
             } while ($status['running']);
 
