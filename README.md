@@ -18,7 +18,7 @@ In the main VOsaka version you can see simple syntax and memory optimization thr
 - ext-shmop
 - ext-fileinfo
 - ext-zlib
-- sysvsem (if you want use Mutext)
+- ext-sysvsem
 
 # Installation
 You can install the library using Composer. Run the following command in your terminal:
