@@ -23,7 +23,7 @@ current thread until all asynchronous tasks are finished.
 Runs multiple fibers synchronously and returns their results.
 
 ```php
-public static new(callable|\Generator|\vosaka\foroutines\Async|\Fiber $fiber): array
+public static new(callable|\Generator|\vosaka\foroutines\Async|\venndev\vosaka\core\Result|\Fiber $callable, \vosaka\foroutines\Dispatchers $dispatchers = Dispatchers::DEFAULT, callable|\Generator|\vosaka\foroutines\Async|\Fiber $fiber): array
 ```
 
 
@@ -37,6 +37,8 @@ public static new(callable|\Generator|\vosaka\foroutines\Async|\Fiber $fiber): a
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
+| `$callable` | **callable&#124;\Generator&#124;\vosaka\foroutines\Async&#124;\venndev\vosaka\core\Result&#124;\Fiber** |  |
+| `$dispatchers` | **\vosaka\foroutines\Dispatchers** |  |
 | `$fiber` | **callable&#124;\Generator&#124;\vosaka\foroutines\Async&#124;\Fiber** | The fibers to run. |
 
 
@@ -51,4 +53,4 @@ The results of the completed fibers.
 
 
 ***
-> Automatically generated on 2025-07-26
+> Automatically generated on 2025-07-27

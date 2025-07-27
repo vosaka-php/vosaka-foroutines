@@ -99,4 +99,4 @@ private static isFiberCallbackGenerator(callable $callback): bool
 
 
 ***
-> Automatically generated on 2025-07-26
+> Automatically generated on 2025-07-27

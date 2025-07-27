@@ -111,7 +111,7 @@ An Async instance that resolves to the output of the PHP file.
 
 
 ```php
-private runOnWindows(): string
+private runOnWindows(): mixed
 ```
 
 
@@ -132,7 +132,7 @@ private runOnWindows(): string
 
 
 ```php
-private runOnUnix(): string
+private runOnUnix(): mixed
 ```
 
 
@@ -181,4 +181,4 @@ An Async instance that resolves to the output of the PHP file.
 
 
 ***
-> Automatically generated on 2025-07-26
+> Automatically generated on 2025-07-27

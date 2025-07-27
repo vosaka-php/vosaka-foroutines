@@ -99,4 +99,4 @@ public run(): \vosaka\foroutines\Async
 
 
 ***
-> Automatically generated on 2025-07-26
+> Automatically generated on 2025-07-27
