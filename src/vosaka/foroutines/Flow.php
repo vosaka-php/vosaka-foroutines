@@ -21,7 +21,7 @@ final class Flow extends BaseFlow
     /**
      * Create a new Flow from a callable, Generator, Async, or Fiber
      */
-    public static function create(callable|Generator|Async|Fiber $source): Flow
+    public static function new(callable|Generator|Async|Fiber $source): Flow
     {
         return new self($source);
     }

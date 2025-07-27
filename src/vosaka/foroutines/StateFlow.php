@@ -25,7 +25,7 @@ final class StateFlow extends BaseFlow
     /**
      * Create a new StateFlow with initial value
      */
-    public static function create(mixed $initialValue): StateFlow
+    public static function new(mixed $initialValue): StateFlow
     {
         return new self($initialValue);
     }

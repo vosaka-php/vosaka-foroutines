@@ -24,7 +24,7 @@ final class SharedFlow extends BaseFlow
     /**
      * Create a new SharedFlow
      */
-    public static function create(int $replay = 0): SharedFlow
+    public static function new(int $replay = 0): SharedFlow
     {
         return new self($replay);
     }

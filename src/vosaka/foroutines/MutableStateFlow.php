@@ -11,7 +11,7 @@ use Throwable;
  */
 final class MutableStateFlow extends StateFlow
 {
-    public static function create(mixed $initialValue): MutableStateFlow
+    public static function new(mixed $initialValue): MutableStateFlow
     {
         return new self($initialValue);
     }
