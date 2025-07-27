@@ -34,7 +34,7 @@ final class Sleep
         $start = microtime(true);
         if (Fiber::getCurrent() === null) {
             while ((microtime(true) - $start) < $seconds) {
-                Launch::runOnce();
+                Launch::getInstance()->runOnce();
             }
         }
 

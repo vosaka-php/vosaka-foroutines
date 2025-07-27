@@ -28,7 +28,7 @@ final class Pause
         if (Fiber::getCurrent() === null) {
             throw new RuntimeException('Pause can only be called within a Foroutine scope.');
         }
-        Launch::runOnce();
+        Launch::getInstance()->runOnce();
         WorkerPool::run();
         Fiber::suspend();
     }

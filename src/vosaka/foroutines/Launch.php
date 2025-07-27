@@ -6,20 +6,26 @@ namespace vosaka\foroutines;
 
 use Fiber;
 use Generator;
+use Throwable;
 use venndev\vosaka\core\Result;
 
 /**
  * Launches a new asynchronous task that runs concurrently with the main thread.
  * It manages a queue of child scopes, each containing a fiber that executes the task.
  */
-final class Launch
+final class Launch extends Job
 {
+    use Instance;
+
     /**
-     * @var array<int, ChildScope>
+     * @var array<int, Job>
      */
     public static array $queue = [];
 
-    private function __construct(private int $id) {}
+    private function __construct(private int $id)
+    {
+        parent::__construct($id);
+    }
 
     /**
      * Creates a new asynchronous task. But it run concurrently with the main thread.
@@ -45,11 +51,11 @@ final class Launch
     private static function makeLaunch(callable|Generator|Async|Result|Fiber $callable): Launch
     {
         $fiber = FiberUtils::makeFiber($callable);
-        $childScope = new ChildScope();
-        $childScope->id = spl_object_id($fiber);
-        $childScope->fiber = $fiber;
-        self::$queue[$childScope->id] = $childScope;
-        return new self($childScope->id);
+        $id = spl_object_id($fiber);
+        $job = new self($id);
+        $job->fiber = $fiber;
+        self::$queue[$job->id] = $job;
+        return $job;
     }
 
     /**
@@ -61,28 +67,41 @@ final class Launch
         if (isset(self::$queue[$this->id])) {
             unset(self::$queue[$this->id]);
         }
+        parent::cancel();
     }
 
     /**
      * Runs the next task in the queue if available.
      * This method should be called periodically to ensure that tasks are executed.
      */
-    public static function runOnce(): void
+    public function runOnce(): void
     {
         if (count(Launch::$queue) > 0) {
-            $childScope = array_shift(Launch::$queue);
-            $fiber = $childScope->fiber;
+            $job = array_shift(Launch::$queue);
+            $fiber = $job->fiber;
 
-            if (!$fiber->isStarted()) {
-                $fiber->start();
+            if ($job->isFinal()) {
+                unset(Launch::$queue[$job->id]);
+                return;
             }
 
-            if (!$fiber->isTerminated()) {
-                $fiber->resume();
+            try {
+                if (!$fiber->isStarted()) {
+                    $job->start();
+                }
+
+                if (!$fiber->isTerminated()) {
+                    $fiber->resume();
+                } else {
+                    $job->complete();
+                }
+            } catch (Throwable $e) {
+                $job->fail();
+                throw $e;
             }
 
             if (FiberUtils::fiberStillRunning($fiber)) {
-                Launch::$queue[$childScope->id] = $childScope;
+                Launch::$queue[$job->id] = $job;
             }
         }
     }
