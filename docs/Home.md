@@ -29,6 +29,7 @@ This is an automatically generated documentation for **Documentation**.
 | [`Process`](./classes/vosaka/foroutines/Process.md) | Process class for running closures in a separate process using shared memory.|
 | [`Repeat`](./classes/vosaka/foroutines/Repeat.md) | |
 | [`RunBlocking`](./classes/vosaka/foroutines/RunBlocking.md) | RunBlocking is a utility class that allows you to run multiple fibers synchronously<br />until all of them complete. It is useful for testing or when you need to block the<br />current thread until all asynchronous tasks are finished.|
+| [`Timeout`](./classes/vosaka/foroutines/Timeout.md) | Fiber Timeout Manager<br />Provides timeout functionality for PHP Fibers similar to Kotlin coroutines|
 | [`Worker`](./classes/vosaka/foroutines/Worker.md) | Worker class for running closures asynchronously.|
 | [`WorkerPool`](./classes/vosaka/foroutines/WorkerPool.md) | WorkerPool class for managing a pool of workers that can run closures asynchronously.|
 
@@ -100,4 +101,4 @@ This is an automatically generated documentation for **Documentation**.
 
 
 ***
-> Automatically generated on 2025-07-27
+> Automatically generated on 2025-07-28

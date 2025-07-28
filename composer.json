@@ -20,7 +20,6 @@
         "laravel/serializable-closure": "^2.0",
         "ext-shmop": "*",
         "ext-fileinfo": "*",
-        "ext-zlib": "*",
-        "ext-sysvsem": "*"
+        "ext-zlib": "*"
     }
 }

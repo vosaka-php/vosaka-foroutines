@@ -52,4 +52,4 @@ public static new(int $count, callable $callable): void
 
 
 ***
-> Automatically generated on 2025-07-27
+> Automatically generated on 2025-07-28

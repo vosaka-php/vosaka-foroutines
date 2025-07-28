@@ -5,7 +5,8 @@
 Class Mutex
 Provides mutual exclusion (mutex) functionality for multi-process synchronization.
 
-Supports both file-based locking and System V semaphores.
+Automatically detects platform capabilities and falls back to compatible methods.
+Supports file-based locking, System V semaphores, and APCu-based locking.
 
 * Full name: `\vosaka\foroutines\sync\Mutex`
 
@@ -16,6 +17,8 @@ Supports both file-based locking and System V semaphores.
 |:---------|:-----------|:-----|:------|
 |`LOCK_FILE`|public| |&#039;file&#039;|
 |`LOCK_SEMAPHORE`|public| |&#039;semaphore&#039;|
+|`LOCK_APCU`|public| |&#039;apcu&#039;|
+|`LOCK_AUTO`|public| |&#039;auto&#039;|
 
 ## Properties
 
@@ -95,6 +98,21 @@ private $lockType
 
 ***
 
+### actualLockType
+
+
+
+```php
+private $actualLockType
+```
+
+
+
+
+
+
+***
+
 ### isLocked
 
 
@@ -140,6 +158,21 @@ private $lockName
 
 ***
 
+### apcu_key
+
+
+
+```php
+private $apcu_key
+```
+
+
+
+
+
+
+***
+
 ## Methods
 
 
@@ -148,7 +181,7 @@ private $lockName
 
 
 ```php
-public __construct(string $name, string $type = self::LOCK_FILE, int $timeout, string|null $lockDir = null): mixed
+public __construct(string $name, string $type = self::LOCK_AUTO, int $timeout, string|null $lockDir = null): mixed
 ```
 
 
@@ -163,9 +196,120 @@ public __construct(string $name, string $type = self::LOCK_FILE, int $timeout, s
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `$name` | **string** | Unique name for the mutex |
-| `$type` | **string** | Lock type: &#039;file&#039; or &#039;semaphore&#039; |
+| `$type` | **string** | Lock type: &#039;file&#039;, &#039;semaphore&#039;, &#039;apcu&#039;, or &#039;auto&#039; |
 | `$timeout` | **int** | Timeout in seconds (0 = no timeout) |
 | `$lockDir` | **string&#124;null** | Directory for lock files (only for file locks) |
+
+
+
+
+
+***
+
+### detectBestLockType
+
+Detect the best available lock type for current platform
+
+```php
+private detectBestLockType(): string
+```
+
+
+
+
+
+
+
+
+
+
+
+
+***
+
+### validateAndGetLockType
+
+Validate requested lock type and return actual usable type
+
+```php
+private validateAndGetLockType(string $requestedType): string
+```
+
+
+
+
+
+
+
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$requestedType` | **string** |  |
+
+
+
+
+
+***
+
+### isSemaphoreAvailable
+
+Check if System V semaphore is available
+
+```php
+private isSemaphoreAvailable(): bool
+```
+
+
+
+
+
+
+
+
+
+
+
+
+***
+
+### isApcuAvailable
+
+Check if APCu is available
+
+```php
+private isApcuAvailable(): bool
+```
+
+
+
+
+
+
+
+
+
+
+
+
+***
+
+### isWindows
+
+Check if we're running on Windows
+
+```php
+private isWindows(): bool
+```
+
+
+
+
+
+
+
 
 
 
@@ -214,6 +358,54 @@ private initSemaphoreLock(): void
 
 
 
+
+
+
+
+
+***
+
+### initApcuLock
+
+Initialize APCu-based locking
+
+```php
+private initApcuLock(): void
+```
+
+
+
+
+
+
+
+
+
+
+
+
+***
+
+### generateSemaphoreKey
+
+Generate a semaphore key from mutex name
+
+```php
+private generateSemaphoreKey(string $name): int
+```
+
+
+
+
+
+
+
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$name` | **string** |  |
 
 
 
@@ -311,6 +503,33 @@ private acquireSemaphoreLock(bool $blocking): bool
 
 ***
 
+### acquireApcuLock
+
+Acquire APCu-based lock
+
+```php
+private acquireApcuLock(bool $blocking): bool
+```
+
+
+
+
+
+
+
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$blocking` | **bool** |  |
+
+
+
+
+
+***
+
 ### release
 
 Release the mutex lock
@@ -363,6 +582,27 @@ Release semaphore-based lock
 
 ```php
 private releaseSemaphoreLock(): bool
+```
+
+
+
+
+
+
+
+
+
+
+
+
+***
+
+### releaseApcuLock
+
+Release APCu-based lock
+
+```php
+private releaseApcuLock(): bool
 ```
 
 
@@ -482,6 +722,27 @@ public getInfo(): array
 
 ***
 
+### getPlatformInfo
+
+Get platform compatibility report
+
+```php
+public static getPlatformInfo(): array
+```
+
+
+
+* This method is **static**.
+
+
+
+
+
+
+
+
+***
+
 ### __destruct
 
 Cleanup resources
@@ -508,7 +769,7 @@ public __destruct(): mixed
 Static factory method for quick mutex creation
 
 ```php
-public static create(string $name, string $type = self::LOCK_FILE, int $timeout): static
+public static create(string $name, string $type = self::LOCK_AUTO, int $timeout): static
 ```
 
 
@@ -537,7 +798,7 @@ public static create(string $name, string $type = self::LOCK_FILE, int $timeout)
 Static method to execute code with mutex protection
 
 ```php
-public static protect(string $mutexName, callable $callback, string $lockType = self::LOCK_FILE, int $timeout = 30): mixed
+public static protect(string $mutexName, callable $callback, string $lockType = self::LOCK_AUTO, int $timeout = 30): mixed
 ```
 
 
@@ -564,4 +825,4 @@ public static protect(string $mutexName, callable $callback, string $lockType = 
 
 
 ***
-> Automatically generated on 2025-07-27
+> Automatically generated on 2025-07-28

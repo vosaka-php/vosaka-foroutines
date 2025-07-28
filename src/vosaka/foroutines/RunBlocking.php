@@ -18,7 +18,7 @@ final class RunBlocking
     /**
      * Runs multiple fibers synchronously and returns their results.
      *
-     * @param callable|Generator|Async|Fiber ...$fiber The fibers to run.
+     * @param callable|Generator|Async|Result|Fiber ...$fiber The fibers to run.
      * @return array The results of the completed fibers.
      */
     public static function new(
