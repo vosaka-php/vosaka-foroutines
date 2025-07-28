@@ -17,7 +17,7 @@ final class Repeat
      * @throws InvalidArgumentException If the count is less than or equal to zero.
      */
     public static function new(
-        int $count = 0,
+        int $count,
         callable $callable
     ): void {
         if ($count <= 0) {

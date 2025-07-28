@@ -7,6 +7,8 @@ use vosaka\foroutines\Dispatchers;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\Delay;
+use vosaka\foroutines\Repeat;
+use vosaka\foroutines\WithTimeout;
 
 // This function simulates an asynchronous
 // Dispatchers::IO operation that open new thread
@@ -32,6 +34,16 @@ RunBlocking::new(function () {
         Delay::new(1);
         var_dump('Generator 1 completed');
         return yield 20;
+    });
+
+    Repeat::new(5, function () {
+        Delay::new(1);
+        var_dump('Repeat function executed');
+    });
+
+    WithTimeout::new(1500, function () {
+        Delay::new(1);
+        var_dump('Timeout reached');
     });
 
     $hello = 'Hello, World!';
