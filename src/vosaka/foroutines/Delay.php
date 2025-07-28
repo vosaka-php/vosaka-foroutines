@@ -10,25 +10,22 @@ use InvalidArgumentException;
 final class Delay
 {
     /**
-     * Delays the execution of the current fiber for a specified number of seconds.
+     * Delays the execution of the current Foroutine for a specified number of milliseconds.
+     * If called outside of a Foroutine, it will run the event loop until the delay is complete.
      *
-     * @param float $seconds The number of seconds to delay. Must be a non-negative float.
-     * @throws InvalidArgumentException If the provided duration is negative.
+     * @param int $ms The delay duration in milliseconds.
+     * @throws InvalidArgumentException if $ms is less than or equal to 0.
      */
-    public static function new(float $seconds): void
+    public static function new(int $ms): void
     {
-        if ($seconds < 0) {
-            throw new InvalidArgumentException('Delay duration must be a non-negative integer.');
-        }
-
-        $start = microtime(true);
+        $start = TimeUtils::currentTimeMillis();
         if (Fiber::getCurrent() === null) {
-            while ((microtime(true) - $start) < $seconds) {
+            while (TimeUtils::elapsedTimeMillis($start) < $ms) {
                 Launch::getInstance()->runOnce();
             }
         }
 
-        while ((microtime(true) - $start) < $seconds) {
+        while (TimeUtils::elapsedTimeMillis($start) < $ms) {
             Pause::new();
         }
     }

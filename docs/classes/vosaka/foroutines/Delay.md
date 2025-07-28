@@ -18,13 +18,13 @@
 
 ### new
 
-Delays the execution of the current fiber for a specified number of seconds.
+Delays the execution of the current Foroutine for a specified number of milliseconds.
 
 ```php
-public static new(float $seconds): void
+public static new(int $ms): void
 ```
 
-
+If called outside of a Foroutine, it will run the event loop until the delay is complete.
 
 * This method is **static**.
 
@@ -35,13 +35,13 @@ public static new(float $seconds): void
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `$seconds` | **float** | The number of seconds to delay. Must be a non-negative float. |
+| `$ms` | **int** | The delay duration in milliseconds. |
 
 
 
 
 **Throws:**
-<p>If the provided duration is negative.</p>
+<p>if $ms is less than or equal to 0.</p>
 
 - [`InvalidArgumentException`](../../InvalidArgumentException.md)
 

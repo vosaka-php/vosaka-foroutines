@@ -26,23 +26,23 @@ $time = microtime(true);
 
 RunBlocking::new(function () {
     Launch::new(function () {
-        Delay::new(3);
+        Delay::new(3000);
         var_dump('Async 2 completed');
     });
 
     Launch::new(function (): Generator {
-        Delay::new(1);
+        Delay::new(1000);
         var_dump('Generator 1 completed');
         return yield 20;
     });
 
     Repeat::new(5, function () {
-        Delay::new(1);
+        Delay::new(1000);
         var_dump('Repeat function executed');
     });
 
     WithTimeout::new(1500, function () {
-        Delay::new(1);
+        Delay::new(1000);
         var_dump('Timeout reached');
     });
 
@@ -51,7 +51,7 @@ RunBlocking::new(function () {
     var_dump('Result from main:', $result);
 });
 
-Delay::new(2);
+Delay::new(2000);
 
 var_dump('Total execution time:', microtime(true) - $time);
 var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');

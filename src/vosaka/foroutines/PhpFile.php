@@ -64,7 +64,7 @@ readonly class PhpFile
             $fullOutput .= $newOutput;
             $fullError .= $newError;
 
-            Delay::new(0.05);
+            Delay::new(500);
         }
 
         $remainingOutput = $process->getIncrementalOutput();
@@ -129,7 +129,7 @@ readonly class PhpFile
                 $cleanup();
                 throw new Exception("Process timeout after {$timeout} seconds");
             }
-            Delay::new(0.05);
+            Delay::new(500);
         }
 
         $output = file_exists($tempFile) ? file_get_contents($tempFile) : '';
@@ -204,7 +204,7 @@ readonly class PhpFile
                 }
 
                 if ($status['running']) {
-                    Delay::new(0.05);
+                    Delay::new(500);
                 }
             } while ($status['running']);
 

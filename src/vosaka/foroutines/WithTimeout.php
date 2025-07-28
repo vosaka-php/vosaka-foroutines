@@ -26,13 +26,13 @@ final class WithTimeout
         }
 
         $fiber = new Fiber($callable);
-        $startTime = microtime(true);
+        $startTime = TimeUtils::currentTimeMillis();
 
         try {
             $fiber->start();
 
             while (!$fiber->isTerminated()) {
-                $elapsedTime = (microtime(true) - $startTime) * 1000;
+                $elapsedTime = TimeUtils::elapsedTimeMillis($startTime);
                 if ($elapsedTime >= $timeoutMs) {
                     throw new RuntimeException("Timed out waiting for {$timeoutMs} ms");
                 }
