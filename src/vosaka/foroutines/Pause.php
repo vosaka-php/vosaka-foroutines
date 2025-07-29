@@ -27,7 +27,7 @@ final class Pause
     {
         if (Fiber::getCurrent() === null) {
             // Instead of error_log because if called in thread context, it will spam in log
-            echo '[' . date('YmdH') . '] [Warning] Pause can only be called within a Foroutine context.' . PHP_EOL;
+            /* echo '[' . date('YmdH') . '] [Warning] Pause can only be called within a Foroutine context.' . PHP_EOL; */
             return;
         }
 

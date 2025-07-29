@@ -55,7 +55,7 @@ $data = stringFromMemoryBlock($dataCompressed);
  */
 $serializedClosure = unserialize($data);
 $closure = $serializedClosure->getClosure();
-ob_start();
+/* ob_start(); */
 try {
     $result = $closure();
     if ($result instanceof Generator) {
@@ -72,7 +72,7 @@ try {
     error('Error in closure execution: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
     exit(1);
 }
-ob_end_clean();
-echo base64_encode(serialize($result));
+/* ob_end_clean(); */
+echo '<RESULT>' . base64_encode(serialize($result));
 
 exit(0);

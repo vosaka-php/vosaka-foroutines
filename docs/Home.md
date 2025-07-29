@@ -28,6 +28,7 @@ This is an automatically generated documentation for **Documentation**.
 | [`PhpFile`](./classes/vosaka/foroutines/PhpFile.md) | Class PhpFile<br />This class is used to run a PHP file asynchronously.|
 | [`Process`](./classes/vosaka/foroutines/Process.md) | Process class for running closures in a separate process using shared memory.|
 | [`Repeat`](./classes/vosaka/foroutines/Repeat.md) | |
+| [`RequireUtils`](./classes/vosaka/foroutines/RequireUtils.md) | |
 | [`RunBlocking`](./classes/vosaka/foroutines/RunBlocking.md) | RunBlocking is a utility class that allows you to run multiple fibers synchronously<br />until all of them complete. It is useful for testing or when you need to block the<br />current thread until all asynchronous tasks are finished.|
 | [`TimeUtils`](./classes/vosaka/foroutines/TimeUtils.md) | |
 | [`WithTimeout`](./classes/vosaka/foroutines/WithTimeout.md) | |
@@ -103,4 +104,4 @@ This is an automatically generated documentation for **Documentation**.
 
 
 ***
-> Automatically generated on 2025-07-28
+> Automatically generated on 2025-07-29

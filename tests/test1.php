@@ -53,9 +53,11 @@ if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
         var_dump('Result from main:', $result);
 
         file_put_contents('tests.txt', 'Hello, World! from main');
+
+        Delay::new(2000); // Delay let wait all threads to finish
     }, Dispatchers::IO);
 
-    Delay::new(10000);
+    Delay::new(7000); // Delay let wait all threads to finish
 
     var_dump('Total execution time:', microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');

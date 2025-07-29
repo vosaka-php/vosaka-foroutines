@@ -75,6 +75,60 @@ public __construct(string $file, array $args = []): mixed
 
 ***
 
+### echoOutputNoResult
+
+
+
+```php
+private echoOutputNoResult(string $output): void
+```
+
+
+
+
+
+
+
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$output` | **string** |  |
+
+
+
+
+
+***
+
+### getResultFromOutput
+
+
+
+```php
+private getResultFromOutput(string $output): mixed
+```
+
+
+
+
+
+
+
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$output` | **string** |  |
+
+
+
+
+
+***
+
 ### run
 
 Runs the PHP file asynchronously.
@@ -106,12 +160,12 @@ An Async instance that resolves to the output of the PHP file.
 
 ***
 
-### runOnWindows
+### runProcess
 
 
 
 ```php
-private runOnWindows(): mixed
+private runProcess(): mixed
 ```
 
 
@@ -127,14 +181,15 @@ private runOnWindows(): mixed
 
 ***
 
-### runOnUnix
+### runOnUnixWithProcOpen
 
-
+Alternative Unix implementation using proc_open for more control over the process.
 
 ```php
-private runOnUnix(): mixed
+private runOnUnixWithProcOpen(): mixed
 ```
 
+This method provides real-time output streaming similar to Windows implementation.
 
 
 
@@ -143,6 +198,11 @@ private runOnUnix(): mixed
 
 
 
+
+**Throws:**
+<p>if the process fails or if there is an error reading the output.</p>
+
+- [`Exception`](../../Exception.md)
 
 
 
@@ -181,4 +241,4 @@ An Async instance that resolves to the output of the PHP file.
 
 
 ***
-> Automatically generated on 2025-07-28
+> Automatically generated on 2025-07-29

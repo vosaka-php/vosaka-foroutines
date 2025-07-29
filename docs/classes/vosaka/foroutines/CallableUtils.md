@@ -97,6 +97,34 @@ public static generatorToCallable(\Generator $generator): callable
 
 ***
 
+### makeCallableForThread
+
+
+
+```php
+public static makeCallableForThread(callable $callable, array $includedFiles): \Closure
+```
+
+
+
+* This method is **static**.
+
+
+
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$callable` | **callable** |  |
+| `$includedFiles` | **array** |  |
+
+
+
+
 
 ***
-> Automatically generated on 2025-07-28
+
+
+***
+> Automatically generated on 2025-07-29

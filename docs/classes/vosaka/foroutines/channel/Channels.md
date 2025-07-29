@@ -204,4 +204,4 @@ public static take(\vosaka\foroutines\channel\Channel $input, int $count): \vosa
 
 
 ***
-> Automatically generated on 2025-07-28
+> Automatically generated on 2025-07-29
