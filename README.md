@@ -55,7 +55,7 @@ function work(string $str): Async
     }, Dispatchers::IO);
 }
 
-// Must be run in the main thread, it similar main() function in golang or kotlin, ...
+// Must be run in the main thread
 // If you dont make this check, the code IO will cause memory leak
 if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
     $time = microtime(true);
@@ -86,9 +86,11 @@ if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
         var_dump('Result from main:', $result);
 
         file_put_contents('tests.txt', 'Hello, World! from main');
+
+        Delay::new(2000); // Delay let wait all threads to finish
     }, Dispatchers::IO);
 
-    Delay::new(10000); // Wait all IO tasks done! because child-threads will die when main thread exit!
+    Delay::new(7000); // Delay let wait all threads to finish
 
     var_dump('Total execution time:', microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');
