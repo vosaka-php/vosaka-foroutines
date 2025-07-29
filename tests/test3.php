@@ -8,6 +8,8 @@ use vosaka\foroutines\Launch;
 use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\Delay;
 
+use function vosaka\foroutines\main;
+
 // Simulate HTTP request
 function httpRequest(int $id): Async
 {
@@ -26,7 +28,7 @@ function httpRequest(int $id): Async
             'result' => $result,
             'timestamp' => microtime(true)
         ];
-    });
+    }, Dispatchers::IO);
 }
 
 // Simulate database operation
@@ -47,10 +49,10 @@ function dbQuery(int $id): Async
             'records' => count($data),
             'sample' => array_slice($data, 0, 3)
         ];
-    });
+    }, Dispatchers::IO);
 }
 
-if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
+main(function () {
     echo "Starting PHP Concurrent Benchmark...\n";
     $startTime = microtime(true);
     $startMemory = memory_get_usage(true);
@@ -93,4 +95,4 @@ if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
     echo "Peak memory: " . round(memory_get_peak_usage(true) / 1024 / 1024, 2) . " MB\n";
     echo "HTTP requests completed: " . count($httpResults) . "\n";
     echo "DB queries completed: " . count($dbResults) . "\n";
-}
+});

@@ -10,6 +10,8 @@ use vosaka\foroutines\Delay;
 use vosaka\foroutines\Repeat;
 use vosaka\foroutines\WithTimeout;
 
+use function vosaka\foroutines\main;
+
 // This function simulates an asynchronous
 // Dispatchers::IO operation that open new thread
 function work(string $str): Async
@@ -24,7 +26,7 @@ function work(string $str): Async
 
 // Must be run in the main thread
 // If you dont make this check, the code IO will cause memory leak
-if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
+main(function () {
     $time = microtime(true);
 
     RunBlocking::new(function () {
@@ -61,4 +63,4 @@ if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
 
     var_dump('Total execution time:', microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');
-}
+});

@@ -4,9 +4,11 @@ use vosaka\foroutines\Delay;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\RunBlocking;
 
+use function vosaka\foroutines\main;
+
 require '../vendor/autoload.php';
 
-if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
+main(function () {
     RunBlocking::new(function () {
         Launch::new(function () {
             Delay::new(2000);
@@ -18,4 +20,4 @@ if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
         });
         var_dump('Hello,');
     });
-}
+});

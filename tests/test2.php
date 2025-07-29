@@ -3,11 +3,13 @@
 use vosaka\foroutines\Process;
 use vosaka\foroutines\RunBlocking;
 
+use function vosaka\foroutines\main;
+
 require '../vendor/autoload.php';
 
 // Must be run in the main thread
 // If you dont make this check, the code IO will cause memory leak
-if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
+main(function () {
     RunBlocking::new(function () {
         $process = new Process();
 
@@ -22,4 +24,4 @@ if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
         })->wait();
         var_dump('Result from process:', $result);
     });
-}
+});
