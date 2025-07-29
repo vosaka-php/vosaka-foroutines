@@ -46,5 +46,9 @@ final class RunBlocking
         while (FiberUtils::fiberStillRunning($callable)) {
             $callable->resume();
         }
+
+        while (count(Launch::$queue) > 0) {
+            Launch::getInstance()->runOnce();
+        }
     }
 }
