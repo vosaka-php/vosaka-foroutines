@@ -14,7 +14,7 @@ This is further improvements to the library [async-php](https://github.com/terre
 In the main VOsaka version you can see simple syntax and memory optimization through asynchronous processing based on VOsaka's Generator. This library provides asynchrony like Kotlin so you can easily control area segments in a piece of code. Although the syntax may be more difficult, the effect it brings is promising.
 
 # Rules for working with this library!
-<img src="https://github.com/vosaka-php/vosaka-foroutines/blob/main/rules.png" alt="Async PHP" width="400">
+<img src="https://github.com/vosaka-php/vosaka-foroutines/blob/main/rules.png" alt="Async PHP" width="800">
 
 # Requirements
 - PHP 8.1 or higher
@@ -55,7 +55,7 @@ function work(string $str): Async
     }, Dispatchers::IO);
 }
 
-// Must be run in the main thread
+// Must be run in the main thread, it similar main() function in golang or kotlin, ...
 // If you dont make this check, the code IO will cause memory leak
 if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
     $time = microtime(true);
@@ -88,7 +88,7 @@ if (__FILE__ === realpath($_SERVER['SCRIPT_FILENAME'])) {
         file_put_contents('tests.txt', 'Hello, World! from main');
     }, Dispatchers::IO);
 
-    Delay::new(10000);
+    Delay::new(10000); // Wait all IO tasks done! because child-threads will die when main thread exit!
 
     var_dump('Total execution time:', microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');
