@@ -6,6 +6,7 @@ namespace vosaka\foroutines;
 
 use Fiber;
 use SplPriorityQueue;
+use Throwable;
 
 final class EventLoop
 {
@@ -22,7 +23,12 @@ final class EventLoop
             self::$queue = new SplPriorityQueue();
 
             register_shutdown_function(function () {
-                self::runAll();
+                try {
+                    self::runAll();
+                } catch (Throwable $e) {
+                    error_log('Error during EventLoop shutdown: ' . $e->getMessage() . "\n" .
+                        $e->getTraceAsString());
+                }
             });
         }
     }

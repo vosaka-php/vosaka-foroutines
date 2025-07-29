@@ -21,6 +21,7 @@ final class Delay
         $start = TimeUtils::currentTimeMillis();
         if (Fiber::getCurrent() === null) {
             while (TimeUtils::elapsedTimeMillis($start) < $ms) {
+                WorkerPool::run();
                 Launch::getInstance()->runOnce();
             }
         }

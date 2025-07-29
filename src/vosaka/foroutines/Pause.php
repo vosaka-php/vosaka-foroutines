@@ -26,8 +26,11 @@ final class Pause
     public static function new(): void
     {
         if (Fiber::getCurrent() === null) {
-            throw new RuntimeException('Pause can only be called within a Foroutine scope.');
+            // Instead of error_log because if called in thread context, it will spam in log
+            echo '[' . date('YmdH') . '] [Warning] Pause can only be called within a Foroutine context.' . PHP_EOL;
+            return;
         }
+
         Launch::getInstance()->runOnce();
         WorkerPool::run();
         Fiber::suspend();

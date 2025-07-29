@@ -2,7 +2,7 @@
 
 ini_set('display_errors', 'on');
 ini_set('display_startup_errors', 1);
-ini_set('error_log', 'php-async-errors-' . date('YmdH') . '.log');
+ini_set('error_log', 'foroutines-errors-' . date('YmdH') . '.log');
 error_reporting(E_ALL);
 
 $possiblePaths = [
@@ -34,7 +34,6 @@ if (!isset($argv[1])) {
 $key = (int)$argv[1];
 
 $shmopInstance = shmop_open($key, 'w', 0, 0);
-
 if (!$shmopInstance) {
     error('Could not open Shmop');
     exit(1);
@@ -70,6 +69,8 @@ try {
         'error' => $e->getMessage(),
         'trace' => $e->getTraceAsString(),
     ];
+    error('Error in closure execution: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+    exit(1);
 }
 ob_end_clean();
 echo base64_encode(serialize($result));

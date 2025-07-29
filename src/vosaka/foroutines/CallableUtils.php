@@ -64,4 +64,16 @@ final class CallableUtils
             return $result;
         };
     }
+
+    public static function makeCallableForThread(callable $callable, array $includedFiles): Closure
+    {
+        return function () use ($callable, $includedFiles) {
+            foreach ($includedFiles as $file) {
+                if (file_exists($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+            return call_user_func($callable);
+        };
+    }
 }

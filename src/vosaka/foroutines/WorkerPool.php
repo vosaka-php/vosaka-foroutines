@@ -44,7 +44,7 @@ final class WorkerPool
      */
     public static function add(Closure $closure): int
     {
-        $worker = new Worker($closure);
+        $worker = new Worker(CallableUtils::makeCallableForThread($closure, get_included_files()));
         self::$workers[$worker->id] = $worker;
         return $worker->id;
     }
@@ -57,7 +57,7 @@ final class WorkerPool
      */
     public static function addAsync(Closure $closure): Async
     {
-        $id = self::add($closure);
+        $id = self::add(CallableUtils::makeCallableForThread($closure, get_included_files()));
         return Async::new(function () use ($id) {
             $result = self::waitForResult($id)->wait();
             return $result;
