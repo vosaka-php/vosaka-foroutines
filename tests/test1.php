@@ -59,7 +59,7 @@ main(function () {
         Delay::new(2000); // Delay let wait all threads to finish
     }, Dispatchers::IO);
 
-    Delay::new(7000); // Delay let wait all threads to finish
+    Delay::new(5000); // Delay let wait all threads to finish
 
     var_dump('Total execution time:', microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');
