@@ -96,4 +96,5 @@ main(function () {
 
     var_dump('Total execution time:', microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');
-});```
+});
+```
