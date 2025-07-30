@@ -59,8 +59,8 @@ final class WorkerPool
     {
         $id = self::add(CallableUtils::makeCallableForThread($closure, get_included_files()));
         return Async::new(function () use ($id) {
-            $result = self::waitForResult($id)->wait();
-            return $result;
+            $result = self::waitForResult($id);
+            return $result->wait();
         });
     }
 

@@ -7,6 +7,7 @@ namespace vosaka\foroutines;
 use Fiber;
 use Generator;
 use Throwable;
+use SplQueue;
 use venndev\vosaka\core\Result;
 
 /**
@@ -18,17 +19,29 @@ final class Launch extends Job
     use Instance;
 
     /**
+     * FIFO queue to manage execution order.
+     * @var SplQueue<Job>
+     */
+    public static SplQueue $queue;
+
+    /**
+     * ID-based map for quick access to jobs.
      * @var array<int, Job>
      */
-    public static array $queue = [];
+    public static array $map = [];
 
     public function __construct(public int $id = 0)
     {
         parent::__construct($id);
+
+        // Initialize queue once
+        if (!isset(self::$queue)) {
+            self::$queue = new SplQueue();
+        }
     }
 
     /**
-     * Creates a new asynchronous task. But it run concurrently with the main thread.
+     * Creates a new asynchronous task. It runs concurrently with the main thread.
      *
      * @param callable|Generator|Async|Result|Fiber $callable The function or generator to run asynchronously.
      * @param Dispatchers $dispatcher The dispatcher to use for the async task.
@@ -40,16 +53,16 @@ final class Launch extends Job
     ): Launch {
         if ($dispatcher === Dispatchers::IO) {
             $callable = function () use ($callable) {
-                $result = WorkerPool::addAsync($callable);
-                return $result->wait();
+                $result = WorkerPool::addAsync($callable)->wait();
+                return $result;
             };
             return self::makeLaunch($callable);
         }
 
         if ($dispatcher === Dispatchers::MAIN) {
             $callable = function () use ($callable) {
-                $result = Async::new($callable, Dispatchers::MAIN);
-                return $result->wait();
+                $result = Async::new($callable, Dispatchers::MAIN)->wait();
+                return $result;
             };
             return self::makeLaunch($callable);
         }
@@ -63,19 +76,21 @@ final class Launch extends Job
         $id = spl_object_id($fiber);
         $job = new self($id);
         $job->fiber = $fiber;
-        self::$queue[$job->id] = $job;
+
+        // Store in map and enqueue
+        self::$map[$id] = $job;
+        self::$queue->enqueue($job);
+
         return $job;
     }
 
     /**
      * Cancels the task associated with this Launch instance.
-     * If the task is still running, it will be removed from the queue.
+     * If the task is still running, it will be removed from the map.
      */
     public function cancel(): void
     {
-        if (isset(self::$queue[$this->id])) {
-            unset(self::$queue[$this->id]);
-        }
+        unset(self::$map[$this->id]);
         parent::cancel();
     }
 
@@ -85,18 +100,23 @@ final class Launch extends Job
      */
     public function runOnce(): void
     {
-        if (count(Launch::$queue) > 0) {
-            $job = array_shift(Launch::$queue);
+        if (!self::$queue->isEmpty()) {
+            /** @var Job $job */
+            $job = self::$queue->dequeue();
             $fiber = $job->fiber;
+
+            if (!isset(self::$map[$job->id])) {
+                return;
+            }
 
             if ($job->isTimedOut()) {
                 $job->cancel();
-                unset(Launch::$queue[$job->id]);
+                unset(self::$map[$job->id]);
                 return;
             }
 
             if ($job->isFinal()) {
-                unset(Launch::$queue[$job->id]);
+                unset(self::$map[$job->id]);
                 return;
             }
 
@@ -112,11 +132,15 @@ final class Launch extends Job
                 }
             } catch (Throwable $e) {
                 $job->fail();
+                unset(self::$map[$job->id]);
                 throw $e;
             }
 
+            // Requeue if still running
             if (FiberUtils::fiberStillRunning($fiber)) {
-                Launch::$queue[$job->id] = $job;
+                self::$queue->enqueue($job);
+            } else {
+                unset(self::$map[$job->id]);
             }
         }
     }
