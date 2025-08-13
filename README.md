@@ -41,6 +41,7 @@ use vosaka\foroutines\Launch;
 use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\Delay;
 use vosaka\foroutines\Repeat;
+use vosaka\foroutines\Thread;
 use vosaka\foroutines\WithTimeout;
 
 use function vosaka\foroutines\main;
@@ -89,10 +90,10 @@ main(function () {
 
         file_put_contents('tests.txt', 'Hello, World! from main');
 
-        Delay::new(2000); // Delay let wait all threads to finish
+        Thread::wait();
     }, Dispatchers::IO);
 
-    Delay::new(7000); // Delay let wait all threads to finish
+    Thread::wait();
 
     var_dump('Total execution time:', microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . 'KB');
