@@ -24,6 +24,14 @@ final class WorkerPool
     public function __construct() {}
 
     /**
+     * Checks if the worker pool is empty.
+     */
+    public static function isEmpty(): bool
+    {
+        return empty(self::$workers);
+    }
+
+    /**
      * Sets the maximum number of workers that can run concurrently.
      *
      * @param int $size The maximum number of workers.

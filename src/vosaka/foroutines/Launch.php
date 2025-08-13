@@ -41,6 +41,16 @@ final class Launch extends Job
     }
 
     /**
+     * Returns the number of tasks currently in the queue.
+     *
+     * @return int The number of tasks in the queue.
+     */
+    public function isEmpty(): bool
+    {
+        return self::$queue->isEmpty();
+    }
+
+    /**
      * Creates a new asynchronous task. It runs concurrently with the main thread.
      *
      * @param callable|Generator|Async|Result|Fiber $callable The function or generator to run asynchronously.

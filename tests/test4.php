@@ -1,6 +1,7 @@
 <?php
 
 use vosaka\foroutines\Delay;
+use vosaka\foroutines\Dispatchers;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\RunBlocking;
 
@@ -19,5 +20,9 @@ main(function () {
             var_dump('World2');
         });
         var_dump('Hello,');
-    });
+
+        Delay::new(3000);
+    }, Dispatchers::IO);
+
+    Delay::new(3000);
 });
