@@ -84,7 +84,8 @@ final class ForkProcess
     public function __construct(int $shmopKey = 0)
     {
         if ($shmopKey === 0) {
-            $this->shmopKey = mt_rand(1, self::MAX_INT - 1) + (time() % 1000000);
+            $this->shmopKey =
+                mt_rand(1, self::MAX_INT - 1) + (time() % 1000000);
             // Ensure positive 32-bit int
             $this->shmopKey = abs($this->shmopKey) % self::MAX_INT;
             if ($this->shmopKey === 0) {
@@ -111,22 +112,22 @@ final class ForkProcess
             return false;
         }
 
-        if (!extension_loaded('pcntl')) {
+        if (!extension_loaded("pcntl")) {
             return false;
         }
 
-        if (!function_exists('pcntl_fork')) {
+        if (!function_exists("pcntl_fork")) {
             return false;
         }
 
-        if (!extension_loaded('shmop')) {
+        if (!extension_loaded("shmop")) {
             return false;
         }
 
         // Check if pcntl_fork is not in the disabled functions list
-        $disabled = explode(',', (string) ini_get('disable_functions'));
-        $disabled = array_map('trim', $disabled);
-        if (in_array('pcntl_fork', $disabled, true)) {
+        $disabled = explode(",", (string) ini_get("disable_functions"));
+        $disabled = array_map("trim", $disabled);
+        if (in_array("pcntl_fork", $disabled, true)) {
             return false;
         }
 
@@ -172,7 +173,7 @@ final class ForkProcess
         $shmopKey = $this->shmopKey;
         $markerLen = strlen(self::READY_MARKER);
 
-        $shm = @shmop_open($shmopKey, 'c', 0660, self::MAX_SHMOP_SIZE);
+        $shm = @shmop_open($shmopKey, "c", 0660, self::MAX_SHMOP_SIZE);
         if ($shm === false) {
             throw new Exception(
                 "ForkProcess: Failed to create shmop segment with key {$shmopKey}",
@@ -183,8 +184,12 @@ final class ForkProcess
         shmop_write($shm, str_repeat("\0", min(self::MAX_SHMOP_SIZE, 4096)), 0);
 
         // Create a temp file path for oversized results
-        $tempFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR .
-            'fork_result_' . $shmopKey . '.dat';
+        $tempFile =
+            sys_get_temp_dir() .
+            DIRECTORY_SEPARATOR .
+            "fork_result_" .
+            $shmopKey .
+            ".dat";
         $this->tempFile = $tempFile;
 
         $pid = pcntl_fork();
@@ -237,7 +242,7 @@ final class ForkProcess
             $payloadLen = strlen($payload);
 
             // Open the pre-existing shmop segment
-            $shm = @shmop_open($shmopKey, 'w', 0, 0);
+            $shm = @shmop_open($shmopKey, "w", 0, 0);
 
             if ($shm !== false) {
                 if ($payloadLen <= self::MAX_SHMOP_SIZE) {
@@ -246,7 +251,7 @@ final class ForkProcess
                 } else {
                     // Result too large — write to temp file, store path in shmop
                     file_put_contents($tempFile, $encoded);
-                    $fileMarker = self::READY_MARKER . '__FILE__:' . $tempFile;
+                    $fileMarker = self::READY_MARKER . "__FILE__:" . $tempFile;
                     shmop_write($shm, $fileMarker, 0);
                 }
             } else {
@@ -258,16 +263,16 @@ final class ForkProcess
             // Write error info
             try {
                 $errorResult = [
-                    '__fork_error__' => true,
-                    'message' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
+                    "__fork_error__" => true,
+                    "message" => $e->getMessage(),
+                    "trace" => $e->getTraceAsString(),
+                    "file" => $e->getFile(),
+                    "line" => $e->getLine(),
                 ];
-                $errorPayload = self::READY_MARKER .
-                    base64_encode(serialize($errorResult));
+                $errorPayload =
+                    self::READY_MARKER . base64_encode(serialize($errorResult));
 
-                $shm = @shmop_open($shmopKey, 'w', 0, 0);
+                $shm = @shmop_open($shmopKey, "w", 0, 0);
                 if ($shm !== false) {
                     shmop_write($shm, $errorPayload, 0);
                 }
@@ -275,20 +280,19 @@ final class ForkProcess
                 // Can't do anything more — just exit with error code
             }
 
-            // Use _exit to avoid running parent's shutdown handlers
-            if (function_exists('posix_kill')) {
-                posix_kill(getmypid(), 9); // SIGKILL for immediate exit
-            }
+            // Exit child without running parent's shutdown handlers.
+            // We use exit() instead of posix_kill(SIGKILL) so that
+            // pcntl_wifexited() returns true and pcntl_wexitstatus()
+            // gives a proper exit code in the parent.
             exit(1);
         }
 
-        // Clean exit — use _exit() to skip destructors/shutdown functions
-        // that belong to the parent process.
-        if (function_exists('posix_kill')) {
-            // Preferred: immediate exit without any PHP cleanup
-            posix_kill(getmypid(), 9);
-        }
-        // Fallback
+        // Clean exit — exit(0) terminates the child. We intentionally
+        // do NOT use posix_kill(SIGKILL) because a signal-killed process
+        // causes pcntl_wifexited() to return false in the parent, making
+        // it impossible to distinguish "exited normally with null result"
+        // from "crashed". Plain exit(0) is sufficient; PHP destructors
+        // that run are acceptable since the child is about to terminate.
         exit(0);
     }
 
@@ -304,8 +308,11 @@ final class ForkProcess
      * @return mixed The closure's return value.
      * @throws Exception On child process errors.
      */
-    private function waitForChild(int $pid, int $shmopKey, string $tempFile): mixed
-    {
+    private function waitForChild(
+        int $pid,
+        int $shmopKey,
+        string $tempFile,
+    ): mixed {
         $markerLen = strlen(self::READY_MARKER);
 
         // Poll waitpid with WNOHANG so we don't block
@@ -328,8 +335,9 @@ final class ForkProcess
         }
 
         // Read result from shmop
-        $shm = @shmop_open($shmopKey, 'a', 0, 0);
+        $shm = @shmop_open($shmopKey, "a", 0, 0);
         $decoded = null;
+        $resultFound = false;
 
         if ($shm !== false) {
             $size = shmop_size($shm);
@@ -342,7 +350,7 @@ final class ForkProcess
                 $payload = substr($raw, $markerLen);
 
                 // Check if result was stored in a temp file
-                if (str_starts_with($payload, '__FILE__:')) {
+                if (str_starts_with($payload, "__FILE__:")) {
                     $filePath = substr($payload, 9);
                     if (is_file($filePath) && is_readable($filePath)) {
                         $payload = file_get_contents($filePath);
@@ -357,6 +365,7 @@ final class ForkProcess
                 $serialized = base64_decode($payload);
                 if ($serialized !== false) {
                     $decoded = unserialize($serialized);
+                    $resultFound = true;
                 }
             }
 
@@ -365,25 +374,31 @@ final class ForkProcess
         }
 
         // Fallback: check temp file
-        if ($decoded === null && is_file($tempFile) && is_readable($tempFile)) {
+        if (!$resultFound && is_file($tempFile) && is_readable($tempFile)) {
             $payload = file_get_contents($tempFile);
             @unlink($tempFile);
             $serialized = base64_decode($payload);
             if ($serialized !== false) {
                 $decoded = unserialize($serialized);
+                $resultFound = true;
             }
         }
 
         // Check for error result
-        if (is_array($decoded) && isset($decoded['__fork_error__'])) {
+        if (is_array($decoded) && isset($decoded["__fork_error__"])) {
             throw new Exception(
-                "ForkProcess child error: " . ($decoded['message'] ?? 'Unknown error') .
-                "\n" . ($decoded['trace'] ?? ''),
+                "ForkProcess child error: " .
+                    ($decoded["message"] ?? "Unknown error") .
+                    "\n" .
+                    ($decoded["trace"] ?? ""),
             );
         }
 
-        // If we got nothing and the child exited abnormally, throw
-        if ($decoded === null) {
+        // If we never found a result in shmop or temp file, something
+        // went wrong in the child. Check the exit status for details.
+        // Note: $decoded===null is a valid result (the closure returned null),
+        // so we use $resultFound to distinguish "null result" from "no result".
+        if (!$resultFound) {
             $exitCode = pcntl_wifexited($status)
                 ? pcntl_wexitstatus($status)
                 : -1;
@@ -391,7 +406,7 @@ final class ForkProcess
             if ($exitCode !== 0) {
                 throw new Exception(
                     "ForkProcess: Child process exited with code {$exitCode} " .
-                    "and produced no result",
+                        "and produced no result",
                 );
             }
         }
@@ -419,7 +434,7 @@ final class ForkProcess
      */
     private static function isWindows(): bool
     {
-        return strncasecmp(PHP_OS, 'WIN', 3) === 0;
+        return strncasecmp(PHP_OS, "WIN", 3) === 0;
     }
 
     /**
