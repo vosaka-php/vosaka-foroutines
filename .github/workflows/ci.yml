@@ -38,6 +38,9 @@ jobs:
                   ini-values: max_execution_time=120
                   coverage: none
 
+            - name: Composer update
+              run: composer update
+
             - name: Validate composer.json
               run: composer validate --strict
 
