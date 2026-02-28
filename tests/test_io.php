@@ -26,7 +26,6 @@ main(function () {
         Launch::new(function () use ($class) {
             Delay::new(2000);
             var_dump("World1");
-
             var_dump($class->arr);
         }, Dispatchers::IO);
         Launch::new(function () {
