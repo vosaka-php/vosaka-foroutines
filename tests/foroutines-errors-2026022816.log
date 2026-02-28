@@ -1,0 +1,49 @@
+[28-Feb-2026 16:54:17 UTC] PHP Warning:  Undefined variable $class in laravel-serializable-closure://function () use ($class) {
+        \vosaka\foroutines\Launch::new(function () use ($class) {
+            \vosaka\foroutines\Delay::new(2000);
+            \var_dump("World1");
+
+            \var_dump($class->arr);
+        }, \vosaka\foroutines\Dispatchers::IO);
+        \vosaka\foroutines\Launch::new(function () {
+            \vosaka\foroutines\Delay::new(1000);
+            \var_dump("World2");
+        });
+        \var_dump("Hello,");
+
+        \vosaka\foroutines\Thread::wait();
+    } on line 2
+[28-Feb-2026 16:54:19 UTC] PHP Warning:  {closure:laravel-serializable-closure://function () use ($class) {
+            \vosaka\foroutines\Delay::new(2000);
+            \var_dump("World1");
+
+            \var_dump($class->arr);
+        }:2}(): The script tried to access a property on an incomplete object. Please ensure that the class definition "Test" of the object you are trying to operate on was loaded _before_ unserialize() gets called or provide an autoloader to load the class definition in laravel-serializable-closure://function () use ($class) {
+            \vosaka\foroutines\Delay::new(2000);
+            \var_dump("World1");
+
+            \var_dump($class->arr);
+        } on line 6
+[28-Feb-2026 16:58:31 UTC] PHP Warning:  Undefined variable $class in laravel-serializable-closure://function () use ($class) {
+        \vosaka\foroutines\Launch::new(function () use ($class) {
+            \vosaka\foroutines\Delay::new(2000);
+            \var_dump("World1");
+
+            \var_dump($class->arr);
+        }, \vosaka\foroutines\Dispatchers::IO);
+        \vosaka\foroutines\Launch::new(function () {
+            \vosaka\foroutines\Delay::new(1000);
+            \var_dump("World2");
+        });
+        \var_dump("Hello,");
+
+        \vosaka\foroutines\Thread::wait();
+    } on line 2
+[28-Feb-2026 16:58:31 UTC] PHP Warning:  Undefined variable $callable in laravel-serializable-closure://function () use ($callable, $includedFiles) {
+            foreach ($includedFiles as $file) {
+                if (file_exists($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+            return call_user_func($callable);
+        } on line 2
