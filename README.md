@@ -571,37 +571,6 @@ When all three report no work, the scheduler sleeps briefly — similar to how N
 2. Offloading blocking I/O to child processes via `Dispatchers::IO` (with `pcntl_fork()` or `symfony/process`)
 3. Cooperative multitasking between fibers via `Pause::new()` / `Fiber::suspend()`
 
-## Testing
-
-```bash
-# Run the improvement test suite (65 tests)
-php tests/test_improvements.php
-
-# Run individual test files (from tests/ directory)
-cd tests
-php test_channel.php
-php test_delay.php
-php test_mutex.php
-php test_shared_state_flow.php
-php test_job_lifecycle.php
-php test_error_handling.php
-php test_async_wait.php
-php test_select.php
-php test_structured_concurrency.php
-php test_with_timeout.php
-php test_event_loop.php
-php test_dispatchers.php
-```
-
-### Test Results
-
-On Windows (pcntl not available):
-```
-59 passed, 0 failed, 6 skipped (total: 65)
-```
-
-The 6 skipped tests are `ForkProcess`-specific tests that require `pcntl_fork()` (Linux/macOS only). All fork tests pass on Linux CI.
-
 ## License
 
 MIT
