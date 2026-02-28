@@ -79,7 +79,7 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 
 ## Requirements
 
-- PHP 8.1+
+- PHP 8.2+
 - ext-shmop (required — shared memory for inter-process communication)
 - ext-fileinfo
 - ext-zlib
