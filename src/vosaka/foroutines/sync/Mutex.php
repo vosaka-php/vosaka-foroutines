@@ -24,10 +24,10 @@ class Mutex
     private $lockName;
     private $apcu_key;
 
-    const LOCK_FILE = 'file';
-    const LOCK_SEMAPHORE = 'semaphore';
-    const LOCK_APCU = 'apcu';
-    const LOCK_AUTO = 'auto'; // Automatically choose best available method
+    const LOCK_FILE = "file";
+    const LOCK_SEMAPHORE = "semaphore";
+    const LOCK_APCU = "apcu";
+    const LOCK_AUTO = "auto"; // Automatically choose best available method
 
     /**
      * @param string $name Unique name for the mutex
@@ -39,14 +39,23 @@ class Mutex
         string $name,
         string $type = self::LOCK_AUTO,
         int $timeout = 0,
-        ?string $lockDir = null
+        ?string $lockDir = null,
     ) {
         if (empty($name)) {
-            throw new InvalidArgumentException('Mutex name cannot be empty');
+            throw new InvalidArgumentException("Mutex name cannot be empty");
         }
 
-        if (!in_array($type, [self::LOCK_FILE, self::LOCK_SEMAPHORE, self::LOCK_APCU, self::LOCK_AUTO])) {
-            throw new InvalidArgumentException('Invalid lock type. Use LOCK_FILE, LOCK_SEMAPHORE, LOCK_APCU, or LOCK_AUTO');
+        if (
+            !in_array($type, [
+                self::LOCK_FILE,
+                self::LOCK_SEMAPHORE,
+                self::LOCK_APCU,
+                self::LOCK_AUTO,
+            ])
+        ) {
+            throw new InvalidArgumentException(
+                "Invalid lock type. Use LOCK_FILE, LOCK_SEMAPHORE, LOCK_APCU, or LOCK_AUTO",
+            );
         }
 
         $this->lockName = $name;
@@ -74,7 +83,7 @@ class Mutex
         }
 
         // Cleanup on script termination
-        register_shutdown_function([$this, 'release']);
+        register_shutdown_function([$this, "release"]);
     }
 
     /**
@@ -102,10 +111,14 @@ class Mutex
                 if (!$this->isSemaphoreAvailable()) {
                     // Fallback to next best option
                     if ($this->isApcuAvailable()) {
-                        error_log("Warning: System V semaphore not available, falling back to APCu");
+                        error_log(
+                            "Warning: System V semaphore not available, falling back to APCu",
+                        );
                         return self::LOCK_APCU;
                     } else {
-                        error_log("Warning: System V semaphore not available, falling back to file locking");
+                        error_log(
+                            "Warning: System V semaphore not available, falling back to file locking",
+                        );
                         return self::LOCK_FILE;
                     }
                 }
@@ -113,7 +126,9 @@ class Mutex
 
             case self::LOCK_APCU:
                 if (!$this->isApcuAvailable()) {
-                    error_log("Warning: APCu not available, falling back to file locking");
+                    error_log(
+                        "Warning: APCu not available, falling back to file locking",
+                    );
                     return self::LOCK_FILE;
                 }
                 return self::LOCK_APCU;
@@ -131,7 +146,7 @@ class Mutex
      */
     private function isSemaphoreAvailable(): bool
     {
-        return extension_loaded('sysvsem') && function_exists('sem_get');
+        return extension_loaded("sysvsem") && function_exists("sem_get");
     }
 
     /**
@@ -139,7 +154,9 @@ class Mutex
      */
     private function isApcuAvailable(): bool
     {
-        return extension_loaded('apcu') && function_exists('apcu_store') && apcu_enabled();
+        return extension_loaded("apcu") &&
+            function_exists("apcu_store") &&
+            \apcu_enabled();
     }
 
     /**
@@ -147,7 +164,7 @@ class Mutex
      */
     private function isWindows(): bool
     {
-        return strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+        return strtoupper(substr(PHP_OS, 0, 3)) === "WIN";
     }
 
     /**
@@ -161,7 +178,12 @@ class Mutex
             throw new Exception("Lock directory '{$lockDir}' is not writable");
         }
 
-        $this->lockFile = $lockDir . DIRECTORY_SEPARATOR . 'mutex_' . md5($this->lockName) . '.lock';
+        $this->lockFile =
+            $lockDir .
+            DIRECTORY_SEPARATOR .
+            "mutex_" .
+            md5($this->lockName) .
+            ".lock";
     }
 
     /**
@@ -173,7 +195,7 @@ class Mutex
         $this->semaphoreKey = $this->generateSemaphoreKey($this->lockName);
 
         if ($this->semaphoreKey === -1) {
-            throw new Exception('Failed to generate semaphore key');
+            throw new Exception("Failed to generate semaphore key");
         }
     }
 
@@ -182,7 +204,7 @@ class Mutex
      */
     private function initApcuLock(): void
     {
-        $this->apcu_key = 'mutex_' . md5($this->lockName);
+        $this->apcu_key = "mutex_" . md5($this->lockName);
     }
 
     /**
@@ -191,7 +213,7 @@ class Mutex
     private function generateSemaphoreKey(string $name): int
     {
         // Try ftok first
-        if (function_exists('ftok')) {
+        if (function_exists("ftok")) {
             $key = ftok(__FILE__, substr(md5($name), 0, 1));
             if ($key !== -1) {
                 return $key;
@@ -199,12 +221,12 @@ class Mutex
         }
 
         // Fallback: generate from hash
-        return abs(crc32($name)) % 0x7FFFFFFF;
+        return abs(crc32($name)) % 0x7fffffff;
     }
 
     /**
      * Acquire the mutex lock
-     * 
+     *
      * @param bool $blocking Whether to block until lock is acquired
      * @return bool True if lock acquired, false otherwise
      * @throws Exception
@@ -242,13 +264,14 @@ class Mutex
             }
 
             // Check timeout
-            if ($this->timeout > 0 && (time() - $startTime) >= $this->timeout) {
-                throw new Exception("Mutex timeout after {$this->timeout} seconds");
+            if ($this->timeout > 0 && time() - $startTime >= $this->timeout) {
+                throw new Exception(
+                    "Mutex timeout after {$this->timeout} seconds",
+                );
             }
 
             // Short sleep to avoid busy waiting
             usleep(10000); // 10ms
-
         } while ($blocking);
 
         return false;
@@ -260,9 +283,11 @@ class Mutex
     private function acquireFileLock(bool $blocking): bool
     {
         if (!$this->lockHandle) {
-            $this->lockHandle = fopen($this->lockFile, 'c+');
+            $this->lockHandle = fopen($this->lockFile, "c+");
             if (!$this->lockHandle) {
-                throw new Exception("Failed to open lock file: {$this->lockFile}");
+                throw new Exception(
+                    "Failed to open lock file: {$this->lockFile}",
+                );
             }
         }
 
@@ -279,11 +304,13 @@ class Mutex
             // Create or get existing semaphore (1 resource = mutex behavior)
             $this->semaphore = sem_get($this->semaphoreKey, 1, 0666, 1);
             if (!$this->semaphore) {
-                throw new Exception('Failed to create/get semaphore');
+                throw new Exception("Failed to create/get semaphore");
             }
         }
 
-        return $blocking ? sem_acquire($this->semaphore) : sem_acquire($this->semaphore, true);
+        return $blocking
+            ? sem_acquire($this->semaphore)
+            : sem_acquire($this->semaphore, true);
     }
 
     /**
@@ -291,10 +318,16 @@ class Mutex
      */
     private function acquireApcuLock(bool $blocking): bool
     {
-        $lockValue = getmypid() . '_' . microtime(true);
+        $lockValue = getmypid() . "_" . microtime(true);
 
         // Try to acquire lock
-        if (apcu_add($this->apcu_key, $lockValue, $this->timeout > 0 ? $this->timeout : 3600)) {
+        if (
+            \apcu_add(
+                $this->apcu_key,
+                $lockValue,
+                $this->timeout > 0 ? $this->timeout : 3600,
+            )
+        ) {
             return true;
         }
 
@@ -309,7 +342,7 @@ class Mutex
 
     /**
      * Release the mutex lock
-     * 
+     *
      * @return bool True if successfully released
      */
     public function release(): bool
@@ -375,12 +408,12 @@ class Mutex
      */
     private function releaseApcuLock(): bool
     {
-        return apcu_delete($this->apcu_key);
+        return \apcu_delete($this->apcu_key);
     }
 
     /**
      * Try to acquire lock without blocking
-     * 
+     *
      * @return bool True if lock acquired immediately
      */
     public function tryLock(): bool
@@ -390,7 +423,7 @@ class Mutex
 
     /**
      * Check if the mutex is currently locked by this instance
-     * 
+     *
      * @return bool
      */
     public function isLocked(): bool
@@ -400,7 +433,7 @@ class Mutex
 
     /**
      * Execute a callback with the mutex locked
-     * 
+     *
      * @param callable $callback
      * @param bool $blocking
      * @return mixed The return value of the callback
@@ -409,7 +442,7 @@ class Mutex
     public function synchronized(callable $callback, bool $blocking = true)
     {
         if (!$this->acquire($blocking)) {
-            throw new Exception('Failed to acquire mutex lock');
+            throw new Exception("Failed to acquire mutex lock");
         }
 
         try {
@@ -421,51 +454,51 @@ class Mutex
 
     /**
      * Get mutex information
-     * 
+     *
      * @return array
      */
     public function getInfo(): array
     {
         return [
-            'name' => $this->lockName,
-            'requested_type' => $this->lockType,
-            'actual_type' => $this->actualLockType,
-            'locked' => $this->isLocked,
-            'timeout' => $this->timeout,
-            'platform' => PHP_OS,
-            'is_windows' => $this->isWindows(),
-            'capabilities' => [
-                'sysvsem' => $this->isSemaphoreAvailable(),
-                'apcu' => $this->isApcuAvailable(),
-                'file_locking' => true, // Always available
+            "name" => $this->lockName,
+            "requested_type" => $this->lockType,
+            "actual_type" => $this->actualLockType,
+            "locked" => $this->isLocked,
+            "timeout" => $this->timeout,
+            "platform" => PHP_OS,
+            "is_windows" => $this->isWindows(),
+            "capabilities" => [
+                "sysvsem" => $this->isSemaphoreAvailable(),
+                "apcu" => $this->isApcuAvailable(),
+                "file_locking" => true, // Always available
             ],
-            'lock_file' => $this->lockFile ?? null,
-            'semaphore_key' => $this->semaphoreKey ?? null,
-            'apcu_key' => $this->apcu_key ?? null,
+            "lock_file" => $this->lockFile ?? null,
+            "semaphore_key" => $this->semaphoreKey ?? null,
+            "apcu_key" => $this->apcu_key ?? null,
         ];
     }
 
     /**
      * Get platform compatibility report
-     * 
+     *
      * @return array
      */
     public static function getPlatformInfo(): array
     {
-        $instance = new self('test', self::LOCK_AUTO);
+        $instance = new self("test", self::LOCK_AUTO);
         return [
-            'platform' => PHP_OS,
-            'is_windows' => $instance->isWindows(),
-            'available_methods' => [
-                'file' => true,
-                'semaphore' => $instance->isSemaphoreAvailable(),
-                'apcu' => $instance->isApcuAvailable(),
+            "platform" => PHP_OS,
+            "is_windows" => $instance->isWindows(),
+            "available_methods" => [
+                "file" => true,
+                "semaphore" => $instance->isSemaphoreAvailable(),
+                "apcu" => $instance->isApcuAvailable(),
             ],
-            'recommended_method' => $instance->detectBestLockType(),
-            'extensions' => [
-                'sysvsem' => extension_loaded('sysvsem'),
-                'apcu' => extension_loaded('apcu'),
-            ]
+            "recommended_method" => $instance->detectBestLockType(),
+            "extensions" => [
+                "sysvsem" => extension_loaded("sysvsem"),
+                "apcu" => extension_loaded("apcu"),
+            ],
         ];
     }
 
@@ -477,7 +510,10 @@ class Mutex
         $this->release();
 
         // Clean up semaphore if needed
-        if ($this->semaphore && $this->actualLockType === self::LOCK_SEMAPHORE) {
+        if (
+            $this->semaphore &&
+            $this->actualLockType === self::LOCK_SEMAPHORE
+        ) {
             // Note: sem_remove() removes the semaphore completely
             // Use with caution in multi-process environments
             sem_remove($this->semaphore);
@@ -486,7 +522,7 @@ class Mutex
 
     /**
      * Static factory method for quick mutex creation
-     * 
+     *
      * @param string $name
      * @param string $type
      * @param int $timeout
@@ -495,14 +531,14 @@ class Mutex
     public static function create(
         string $name,
         string $type = self::LOCK_AUTO,
-        int $timeout = 0
+        int $timeout = 0,
     ): self {
         return new static($name, $type, $timeout);
     }
 
     /**
      * Static method to execute code with mutex protection
-     * 
+     *
      * @param string $mutexName
      * @param callable $callback
      * @param string $lockType
@@ -513,7 +549,7 @@ class Mutex
         string $mutexName,
         callable $callback,
         string $lockType = self::LOCK_AUTO,
-        int $timeout = 30
+        int $timeout = 30,
     ) {
         $mutex = self::create($mutexName, $lockType, $timeout);
         return $mutex->synchronized($callback);

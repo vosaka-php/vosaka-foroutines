@@ -40,7 +40,7 @@ final class WorkerPool
     public static function setPoolSize(int $size): void
     {
         if ($size <= 0) {
-            throw new Exception('Pool size must be greater than 0.');
+            throw new Exception("Pool size must be greater than 0.");
         }
         self::$poolSize = $size;
     }
@@ -52,7 +52,12 @@ final class WorkerPool
      */
     public static function add(Closure $closure): int
     {
-        $worker = new Worker(CallableUtils::makeCallableForThread($closure, get_included_files()));
+        $worker = new Worker(
+            CallableUtils::makeCallableForThread(
+                $closure,
+                get_included_files(),
+            ),
+        );
         self::$workers[$worker->id] = $worker;
         return $worker->id;
     }
@@ -65,17 +70,9 @@ final class WorkerPool
      */
     public static function addAsync(Closure $closure): Async
     {
-        $id = self::add(CallableUtils::makeCallableForThread($closure, get_included_files()));
+        $id = self::add($closure);
         return Async::new(function () use ($id) {
-            $result = self::waitForResult($id);
-            return $result->wait();
-        });
-    }
-
-    private static function waitForResult(int $id): Async
-    {
-        return Async::new(function () use ($id) {
-            while (!isset(self::$returns[$id])) {
+            while (!array_key_exists($id, self::$returns)) {
                 Pause::new();
             }
             $result = self::$returns[$id];
@@ -109,7 +106,7 @@ final class WorkerPool
                     $result = $worker->run()->wait();
                     self::$returns[$id] = $result;
                 } catch (Exception $e) {
-                    self::$returns[$id] = 'Error: ' . $e->getMessage();
+                    self::$returns[$id] = "Error: " . $e->getMessage();
                 } finally {
                     self::$running--;
                 }

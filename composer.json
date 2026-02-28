@@ -18,7 +18,6 @@
         }
     ],
     "require": {
-        "venndev/v-osaka": "^1.9",
         "symfony/process": "^7.3",        
         "laravel/serializable-closure": "^2.0",
         "ext-shmop": "*",

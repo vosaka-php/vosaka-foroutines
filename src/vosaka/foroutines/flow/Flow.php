@@ -8,6 +8,8 @@ use Generator;
 use Fiber;
 use RuntimeException;
 use Throwable;
+use vosaka\foroutines\Async;
+use vosaka\foroutines\FiberUtils;
 
 /**
  * Cold Flow - Creates new stream for each collector
@@ -16,7 +18,9 @@ final class Flow extends BaseFlow
 {
     private ?Fiber $fiber = null;
 
-    private function __construct(private readonly callable|Generator|Async|Fiber $source) {}
+    private function __construct(
+        private readonly callable|Generator|Async|Fiber $source,
+    ) {}
 
     /**
      * Create a new Flow from a callable, Generator, Async, or Fiber
@@ -31,7 +35,7 @@ final class Flow extends BaseFlow
      */
     public static function of(mixed ...$values): Flow
     {
-        return self::create(function () use ($values) {
+        return self::new(function () use ($values) {
             foreach ($values as $value) {
                 Flow::emit($value);
             }
@@ -43,7 +47,7 @@ final class Flow extends BaseFlow
      */
     public static function empty(): Flow
     {
-        return self::create(function () {
+        return self::new(function () {
             // Empty flow - no emissions
         });
     }
@@ -53,7 +57,7 @@ final class Flow extends BaseFlow
      */
     public static function fromArray(array $array): Flow
     {
-        return self::create(function () use ($array) {
+        return self::new(function () use ($array) {
             foreach ($array as $value) {
                 Flow::emit($value);
             }
@@ -67,7 +71,9 @@ final class Flow extends BaseFlow
     {
         $fiber = Fiber::getCurrent();
         if ($fiber === null) {
-            throw new RuntimeException('Flow::emit can only be called within a Flow context.');
+            throw new RuntimeException(
+                "Flow::emit can only be called within a Flow context.",
+            );
         }
         Fiber::suspend($value);
     }
@@ -95,7 +101,11 @@ final class Flow extends BaseFlow
                 if ($this->fiber->isSuspended()) {
                     $value = $this->fiber->resume();
 
-                    $processedValue = $this->applyOperators($value, $emittedCount, $skippedCount);
+                    $processedValue = $this->applyOperators(
+                        $value,
+                        $emittedCount,
+                        $skippedCount,
+                    );
 
                     if ($processedValue !== null) {
                         $collector($processedValue);

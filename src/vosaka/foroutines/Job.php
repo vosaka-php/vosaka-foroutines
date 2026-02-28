@@ -13,7 +13,7 @@ class Job
     public ?Fiber $fiber = null;
     public ?Job $job = null;
     private float $startTime;
-    private float $endTime;
+    private ?float $endTime = null;
     private JobState $status;
     private array $joins = [];
     private array $invokers = [];
@@ -32,7 +32,7 @@ class Job
 
     public function getEndTime(): ?float
     {
-        return $this->endTime ?? null;
+        return $this->endTime;
     }
 
     public function getStatus(): JobState
@@ -53,8 +53,12 @@ class Job
 
     public function complete(): void
     {
+        if ($this->status === JobState::COMPLETED) {
+            return; // Already completed, idempotent
+        }
+
         if ($this->status !== JobState::RUNNING) {
-            throw new RuntimeException('Job must be running to complete it.');
+            throw new RuntimeException("Job must be running to complete it.");
         }
         $this->status = JobState::COMPLETED;
         $this->endTime = microtime(true);
@@ -64,8 +68,17 @@ class Job
 
     public function fail(): void
     {
-        if ($this->status !== JobState::RUNNING) {
-            throw new RuntimeException('Job must be running to fail it.');
+        if ($this->status === JobState::FAILED) {
+            return; // Already failed, idempotent
+        }
+
+        // Allow fail from both RUNNING and PENDING states
+        // (a fiber can throw before being fully resumed, e.g. during start())
+        if (
+            $this->status !== JobState::RUNNING &&
+            $this->status !== JobState::PENDING
+        ) {
+            throw new RuntimeException("Job must be running to fail it.");
         }
         $this->status = JobState::FAILED;
         $this->endTime = microtime(true);
@@ -75,8 +88,13 @@ class Job
 
     public function cancel(): void
     {
-        if ($this->status === JobState::COMPLETED || $this->status === JobState::FAILED) {
-            throw new RuntimeException('Job cannot be cancelled after it has completed or failed.');
+        if (
+            $this->status === JobState::COMPLETED ||
+            $this->status === JobState::FAILED
+        ) {
+            throw new RuntimeException(
+                "Job cannot be cancelled after it has completed or failed.",
+            );
         }
         $this->status = JobState::CANCELLED;
         $this->endTime = microtime(true);
@@ -111,8 +129,9 @@ class Job
     public function onJoin(callable $callback): void
     {
         if ($this->isFinal()) {
-            throw new RuntimeException('Cannot add join callback to a job that has already completed.');
-            return;
+            throw new RuntimeException(
+                "Cannot add join callback to a job that has already completed.",
+            );
         }
 
         $this->joins[] = $callback;
@@ -129,19 +148,19 @@ class Job
     public function join(): mixed
     {
         if (!$this->isFinal()) {
-            throw new RuntimeException('Job is not yet complete.');
+            throw new RuntimeException("Job is not yet complete.");
         }
 
         if ($this->isFailed()) {
-            throw new RuntimeException('Job has failed.');
+            throw new RuntimeException("Job has failed.");
         }
 
         if ($this->isCancelled()) {
-            throw new RuntimeException('Job has been cancelled.');
+            throw new RuntimeException("Job has been cancelled.");
         }
 
-        if ($$this->fiber === null) {
-            throw new RuntimeException('Job fiber is not set.');
+        if ($this->fiber === null) {
+            throw new RuntimeException("Job fiber is not set.");
         }
 
         if (!$this->fiber->isStarted()) {
@@ -154,11 +173,13 @@ class Job
                 Pause::new();
             }
         } catch (Throwable $e) {
-            $this->fail();
+            if (!$this->isFinal()) {
+                $this->fail();
+            }
             throw $e;
         }
 
-        if ($this->fiber->isTerminated()) {
+        if ($this->fiber->isTerminated() && !$this->isFinal()) {
             $this->complete();
         }
 
@@ -168,7 +189,9 @@ class Job
     public function invokeOnCompletion(callable $callback): void
     {
         if ($this->isFinal()) {
-            throw new RuntimeException('Cannot add invoke callback to a job that has already completed.');
+            throw new RuntimeException(
+                "Cannot add invoke callback to a job that has already completed.",
+            );
         }
 
         $this->invokers[] = $callback;
@@ -185,7 +208,9 @@ class Job
     public function cancelAfter(float $seconds): void
     {
         if ($this->isFinal()) {
-            throw new RuntimeException('Cannot set timeout for a job that has already completed.');
+            throw new RuntimeException(
+                "Cannot set timeout for a job that has already completed.",
+            );
         }
         $this->timeout = $seconds;
     }
@@ -195,6 +220,6 @@ class Job
         if ($this->timeout === null) {
             return false;
         }
-        return (microtime(true) - $this->startTime) >= $this->timeout;
+        return microtime(true) - $this->startTime >= $this->timeout;
     }
 }

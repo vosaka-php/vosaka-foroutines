@@ -17,21 +17,35 @@ readonly class PhpFile
     public function __construct(private string $file, private array $args = [])
     {
         if (!is_readable($this->file)) {
-            throw new InvalidArgumentException('Error: file ' . $this->file
-                . ' does not exists or is not readable!');
+            throw new InvalidArgumentException(
+                "Error: file " .
+                    $this->file .
+                    " does not exists or is not readable!",
+            );
         }
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
         $mimeType = finfo_file($finfo, $this->file);
         finfo_close($finfo);
-        if (!in_array($mimeType, ['text/x-php', 'application/x-php', 'application/php', 'application/x-httpd-php'])) {
-            throw new Exception('Error: file ' . $this->file . ' is not a PHP file!');
+        if (
+            !in_array($mimeType, [
+                "text/x-php",
+                "application/x-php",
+                "application/php",
+                "application/x-httpd-php",
+            ])
+        ) {
+            throw new Exception(
+                "Error: file " . $this->file . " is not a PHP file!",
+            );
         }
     }
 
     private function echoOutputNoResult(string $output): void
     {
-        if ($this->getResultFromOutput($output) === null) {
-            echo $output;
+        $parts = explode("<RESULT>", $output, 2);
+        $beforeResult = $parts[0];
+        if (strlen($beforeResult) > 0) {
+            echo $beforeResult;
         }
     }
 
@@ -39,7 +53,7 @@ readonly class PhpFile
     {
         // token result
         $output = trim($output);
-        $output = explode("<RESULT>", $output, 2)[1] ?? '';
+        $output = explode("<RESULT>", $output, 2)[1] ?? "";
 
         if (empty($output)) {
             return null;
@@ -91,7 +105,29 @@ readonly class PhpFile
                 throw new Exception("Error in process: {$error}");
             }
 
-            Delay::new(500);
+            // Two-phase cooperative yield:
+            // 1) Pause::new() first — suspends this fiber back to the
+            //    scheduler so other Launch jobs / fibers can run.
+            //    The fiber is in a clean "suspended" state when the
+            //    scheduler sees it, so resume() will work correctly.
+            // 2) usleep after resume — when the scheduler resumes us,
+            //    we sleep a small real wall-clock interval so the child
+            //    process (a separate OS process) has time to advance.
+            //    Without this the parent spins at ~100% CPU doing
+            //    cooperative yields that take microseconds each.
+            Pause::new();
+            usleep(5000); // 5ms
+        }
+
+        // Read any remaining output after the process has finished
+        $remainingOutput = $process->getIncrementalOutput();
+        if (strlen($remainingOutput) !== 0) {
+            $this->echoOutputNoResult($remainingOutput);
+        }
+
+        $remainingError = $process->getIncrementalErrorOutput();
+        if (strlen($remainingError) !== 0) {
+            throw new Exception("Error in process: {$remainingError}");
         }
 
         $result = $process->getOutput();
@@ -108,18 +144,18 @@ readonly class PhpFile
     private function runOnUnixWithProcOpen(): mixed
     {
         $command = [PHP_BINARY, $this->file, ...$this->args];
-        $commandString = implode(' ', array_map('escapeshellarg', $command));
+        $commandString = implode(" ", array_map("escapeshellarg", $command));
 
         $descriptors = [
-            0 => ["pipe", "r"],  // stdin
-            1 => ["pipe", "w"],  // stdout
-            2 => ["pipe", "w"]   // stderr
+            0 => ["pipe", "r"], // stdin
+            1 => ["pipe", "w"], // stdout
+            2 => ["pipe", "w"], // stderr
         ];
 
         $process = proc_open($commandString, $descriptors, $pipes);
 
         if (!is_resource($process)) {
-            throw new Exception('Failed to create process');
+            throw new Exception("Failed to create process");
         }
 
         fclose($pipes[0]); // Close stdin as we don't need it
@@ -128,8 +164,8 @@ readonly class PhpFile
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
 
-        $fullOutput = '';
-        $fullError = '';
+        $fullOutput = "";
+        $fullError = "";
         $startTime = time();
         $timeout = 3600; // 1 hour timeout
 
@@ -159,10 +195,10 @@ readonly class PhpFile
                 $fullError .= $stderr;
             }
 
-            if ($status['running']) {
+            if ($status["running"]) {
                 Delay::new(500);
             }
-        } while ($status['running']);
+        } while ($status["running"]);
 
         // Get any remaining output
         $remainingOutput = stream_get_contents($pipes[1]);
@@ -184,7 +220,9 @@ readonly class PhpFile
         $exitCode = proc_close($process);
 
         if ($exitCode !== 0 && !empty($fullError)) {
-            throw new Exception("Process failed with exit code {$exitCode}: {$fullError}");
+            throw new Exception(
+                "Process failed with exit code {$exitCode}: {$fullError}",
+            );
         }
 
         if (empty($fullOutput)) {

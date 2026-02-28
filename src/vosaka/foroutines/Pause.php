@@ -21,18 +21,19 @@ final class Pause
      * This method should be called within a Foroutine context to yield control
      * back to the event loop, allowing other Foroutines to run concurrently.
      *
-     * @throws RuntimeException if called outside of a Foroutine scope.
+     * Pause is intentionally minimal — it ONLY suspends the current Fiber.
+     * Driving the scheduler (Launch::runOnce, WorkerPool::run) is the
+     * responsibility of the top-level event loop (Thread::wait) or
+     * Async::waitOutsideFiber. Mixing scheduler calls inside Pause caused
+     * nested-runOnce re-entrancy and cross-resuming of fibers from the
+     * shared Launch queue, leading to deadlocks in nested Async contexts.
      */
     public static function new(): void
     {
         if (Fiber::getCurrent() === null) {
-            // Instead of error_log because if called in thread context, it will spam in log
-            /* echo '[' . date('YmdH') . '] [Warning] Pause can only be called within a Foroutine context.' . PHP_EOL; */
             return;
         }
 
-        Launch::getInstance()->runOnce();
-        WorkerPool::run();
         Fiber::suspend();
     }
 }

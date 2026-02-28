@@ -4,6 +4,7 @@ use vosaka\foroutines\Delay;
 use vosaka\foroutines\Dispatchers;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\RunBlocking;
+use vosaka\foroutines\Thread;
 
 use function vosaka\foroutines\main;
 
@@ -21,8 +22,8 @@ main(function () {
         });
         var_dump('Hello,');
 
-        Delay::new(3000);
+        Thread::wait();
     }, Dispatchers::IO);
 
-    Delay::new(3000);
+    Thread::wait();
 });

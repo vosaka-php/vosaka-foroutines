@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "41577ec39098554155ae25c9631d2025",
+    "content-hash": "d69906c5787c6106ad01e6df0718db49",
     "packages": [
         {
             "name": "laravel/serializable-closure",
@@ -127,46 +127,6 @@
                 }
             ],
             "time": "2025-04-17T09:11:12+00:00"
-        },
-        {
-            "name": "venndev/v-osaka",
-            "version": "1.9.0",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/vosaka-php/vosaka.git",
-                "reference": "aa5df4a7dc61c1c249504e9daad13ee985806f12"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/vosaka-php/vosaka/zipball/aa5df4a7dc61c1c249504e9daad13ee985806f12",
-                "reference": "aa5df4a7dc61c1c249504e9daad13ee985806f12",
-                "shasum": ""
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "src/venndev/vosaka/functions.php"
-                ],
-                "psr-4": {
-                    "venndev\\vosaka\\": "src/venndev/vosaka"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "VennV",
-                    "email": "hyplex9009@gmail.com"
-                }
-            ],
-            "description": "A library for php async, ..",
-            "support": {
-                "issues": "https://github.com/vosaka-php/vosaka/issues",
-                "source": "https://github.com/vosaka-php/vosaka/tree/1.9.0"
-            },
-            "time": "2025-07-24T11:09:48+00:00"
         }
     ],
     "packages-dev": [],

@@ -15,9 +15,8 @@ final class Worker
 {
     public int $id;
 
-    public function __construct(
-        public Closure $closure,
-    ) {
+    public function __construct(public Closure $closure)
+    {
         $this->id = mt_rand(1, 1000000) + time();
     }
 
@@ -28,10 +27,7 @@ final class Worker
      */
     public function run(): Async
     {
-        return Async::new(function () {
-            $process = new Process();
-            $result = $process->run($this->closure)->wait();
-            return $result;
-        });
+        $process = new Process();
+        return $process->run($this->closure);
     }
 }

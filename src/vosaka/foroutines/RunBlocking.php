@@ -23,7 +23,7 @@ final class RunBlocking
      */
     public static function new(
         callable|Generator|Async|Result|Fiber $callable,
-        Dispatchers $dispatchers = Dispatchers::DEFAULT
+        Dispatchers $dispatchers = Dispatchers::DEFAULT,
     ): void {
         if ($dispatchers === Dispatchers::IO) {
             WorkerPool::addAsync($callable);
@@ -44,10 +44,13 @@ final class RunBlocking
         }
 
         while (FiberUtils::fiberStillRunning($callable)) {
+            WorkerPool::run();
+            Launch::getInstance()->runOnce();
             $callable->resume();
         }
 
-        while (count(Launch::$queue) > 0) {
+        while (count(Launch::$queue) > 0 || !WorkerPool::isEmpty()) {
+            WorkerPool::run();
             Launch::getInstance()->runOnce();
         }
     }

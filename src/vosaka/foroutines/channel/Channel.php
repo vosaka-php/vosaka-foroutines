@@ -37,10 +37,10 @@ final class Channel implements IteratorAggregate
     private string $serializer;
     private bool $preserveObjectTypes;
 
-    const SERIALIZER_SERIALIZE = 'serialize';
-    const SERIALIZER_JSON = 'json';
-    const SERIALIZER_MSGPACK = 'msgpack';
-    const SERIALIZER_IGBINARY = 'igbinary';
+    const SERIALIZER_SERIALIZE = "serialize";
+    const SERIALIZER_JSON = "json";
+    const SERIALIZER_MSGPACK = "msgpack";
+    const SERIALIZER_IGBINARY = "igbinary";
 
     public function __construct(
         int $capacity = 0,
@@ -48,7 +48,7 @@ final class Channel implements IteratorAggregate
         ?string $channelName = null,
         string $serializer = self::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
-        bool $preserveObjectTypes = true
+        bool $preserveObjectTypes = true,
     ) {
         if ($capacity < 0) {
             throw new Exception("Channel capacity cannot be negative");
@@ -61,7 +61,7 @@ final class Channel implements IteratorAggregate
         $this->tempDir = $tempDir ?: sys_get_temp_dir();
 
         if ($this->interProcess) {
-            $this->channelName = $channelName ?: 'channel_' . uniqid();
+            $this->channelName = $channelName ?: "channel_" . uniqid();
             $this->initInterProcessSupport();
         }
     }
@@ -72,27 +72,33 @@ final class Channel implements IteratorAggregate
     private function initInterProcessSupport(): void
     {
         if (!$this->channelName) {
-            throw new Exception("Channel name is required for inter-process channels");
+            throw new Exception(
+                "Channel name is required for inter-process channels",
+            );
         }
 
         // Create mutexes for synchronization
         $this->bufferMutex = new Mutex(
-            $this->channelName . '_buffer',
+            $this->channelName . "_buffer",
             Mutex::LOCK_AUTO,
             30,
-            $this->tempDir
+            $this->tempDir,
         );
 
         $this->queueMutex = new Mutex(
-            $this->channelName . '_queue',
+            $this->channelName . "_queue",
             Mutex::LOCK_AUTO,
             30,
-            $this->tempDir
+            $this->tempDir,
         );
 
         // Initialize shared memory/file-based storage
-        $this->channelFile = $this->tempDir . DIRECTORY_SEPARATOR .
-            'channel_' . md5($this->channelName) . '.dat';
+        $this->channelFile =
+            $this->tempDir .
+            DIRECTORY_SEPARATOR .
+            "channel_" .
+            md5($this->channelName) .
+            ".dat";
 
         // Try to use System V shared memory if available
         if ($this->isSharedMemoryAvailable()) {
@@ -104,7 +110,7 @@ final class Channel implements IteratorAggregate
         $this->loadChannelState();
 
         // Register cleanup
-        register_shutdown_function([$this, 'cleanup']);
+        register_shutdown_function([$this, "cleanup"]);
     }
 
     /**
@@ -114,16 +120,28 @@ final class Channel implements IteratorAggregate
         string $channelName,
         string $serializer = self::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
-        bool $preserveObjectTypes = true
+        bool $preserveObjectTypes = true,
     ): Channel {
         $tempDir = $tempDir ?: sys_get_temp_dir();
-        $channelFile = $tempDir . DIRECTORY_SEPARATOR . 'channel_' . md5($channelName) . '.dat';
+        $channelFile =
+            $tempDir .
+            DIRECTORY_SEPARATOR .
+            "channel_" .
+            md5($channelName) .
+            ".dat";
 
         if (!file_exists($channelFile)) {
             throw new Exception("Channel '{$channelName}' does not exist");
         }
 
-        $channel = new self(0, true, $channelName, $serializer, $tempDir, $preserveObjectTypes);
+        $channel = new self(
+            0,
+            true,
+            $channelName,
+            $serializer,
+            $tempDir,
+            $preserveObjectTypes,
+        );
         return $channel;
     }
 
@@ -132,8 +150,8 @@ final class Channel implements IteratorAggregate
      */
     private function isSharedMemoryAvailable(): bool
     {
-        return extension_loaded('sysvshm') &&
-            function_exists('shm_attach') &&
+        return extension_loaded("sysvshm") &&
+            function_exists("shm_attach") &&
             !$this->isWindows();
     }
 
@@ -142,7 +160,7 @@ final class Channel implements IteratorAggregate
      */
     private function isWindows(): bool
     {
-        return strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+        return strtoupper(substr(PHP_OS, 0, 3)) === "WIN";
     }
 
     /**
@@ -150,13 +168,17 @@ final class Channel implements IteratorAggregate
      */
     private function generateSharedMemoryKey(): int
     {
-        if (function_exists('ftok') && $this->channelFile && file_exists($this->channelFile)) {
-            $key = ftok($this->channelFile, 'c');
+        if (
+            function_exists("ftok") &&
+            $this->channelFile &&
+            file_exists($this->channelFile)
+        ) {
+            $key = ftok($this->channelFile, "c");
             if ($key !== -1) {
                 return $key;
             }
         }
-        return abs(crc32($this->channelName ?? 'default')) % 0x7FFFFFFF;
+        return abs(crc32($this->channelName ?? "default")) % 0x7fffffff;
     }
 
     /**
@@ -189,9 +211,9 @@ final class Channel implements IteratorAggregate
         $this->bufferMutex->synchronized(function () {
             $state = $this->readChannelState();
             if ($state) {
-                $this->buffer = $state['buffer'] ?? [];
-                $this->closed = $state['closed'] ?? false;
-                $this->capacity = $state['capacity'] ?? $this->capacity;
+                $this->buffer = $state["buffer"] ?? [];
+                $this->closed = $state["closed"] ?? false;
+                $this->capacity = $state["capacity"] ?? $this->capacity;
             }
         });
     }
@@ -206,14 +228,14 @@ final class Channel implements IteratorAggregate
         }
 
         $state = [
-            'buffer' => $this->buffer,
-            'closed' => $this->closed,
-            'capacity' => $this->capacity,
-            'timestamp' => microtime(true),
-            'pid' => getmypid(),
-            'name' => $this->channelName,
-            'serializer' => $this->serializer,
-            'created_by' => getmypid()
+            "buffer" => $this->buffer,
+            "closed" => $this->closed,
+            "capacity" => $this->capacity,
+            "timestamp" => microtime(true),
+            "pid" => getmypid(),
+            "name" => $this->channelName,
+            "serializer" => $this->serializer,
+            "created_by" => getmypid(),
         ];
 
         $this->writeChannelState($state);
@@ -264,8 +286,10 @@ final class Channel implements IteratorAggregate
 
             // Fallback to file
             if ($this->channelFile) {
-                $tempFile = $this->channelFile . '.tmp.' . getmypid();
-                if (file_put_contents($tempFile, $serialized, LOCK_EX) !== false) {
+                $tempFile = $this->channelFile . ".tmp." . getmypid();
+                if (
+                    file_put_contents($tempFile, $serialized, LOCK_EX) !== false
+                ) {
                     rename($tempFile, $this->channelFile);
                 }
             }
@@ -284,22 +308,22 @@ final class Channel implements IteratorAggregate
                 case self::SERIALIZER_JSON:
                     if (is_object($data) && $this->preserveObjectTypes) {
                         $serialized = [
-                            '__class__' => get_class($data),
-                            '__data__' => $this->objectToArray($data)
+                            "__class__" => get_class($data),
+                            "__data__" => $this->objectToArray($data),
                         ];
                         return json_encode($serialized, JSON_THROW_ON_ERROR);
                     }
                     return json_encode($data, JSON_THROW_ON_ERROR);
 
                 case self::SERIALIZER_MSGPACK:
-                    if (function_exists('msgpack_pack')) {
-                        return msgpack_pack($data);
+                    if (function_exists("msgpack_pack")) {
+                        return \msgpack_pack($data);
                     }
                     return serialize($data);
 
                 case self::SERIALIZER_IGBINARY:
-                    if (function_exists('igbinary_serialize')) {
-                        return igbinary_serialize($data);
+                    if (function_exists("igbinary_serialize")) {
+                        return \igbinary_serialize($data);
                     }
                     return serialize($data);
 
@@ -308,7 +332,9 @@ final class Channel implements IteratorAggregate
                     return serialize($data);
             }
         } catch (Exception $e) {
-            throw new Exception("Failed to serialize data: " . $e->getMessage());
+            throw new Exception(
+                "Failed to serialize data: " . $e->getMessage(),
+            );
         }
     }
 
@@ -320,28 +346,36 @@ final class Channel implements IteratorAggregate
         try {
             switch ($this->serializer) {
                 case self::SERIALIZER_JSON:
-                    $decoded = json_decode($data, true, 512, JSON_THROW_ON_ERROR);
+                    $decoded = json_decode(
+                        $data,
+                        true,
+                        512,
+                        JSON_THROW_ON_ERROR,
+                    );
 
                     if (
                         $this->preserveObjectTypes &&
                         is_array($decoded) &&
-                        isset($decoded['__class__']) &&
-                        isset($decoded['__data__'])
+                        isset($decoded["__class__"]) &&
+                        isset($decoded["__data__"])
                     ) {
-                        return $this->arrayToObject($decoded['__class__'], $decoded['__data__']);
+                        return $this->arrayToObject(
+                            $decoded["__class__"],
+                            $decoded["__data__"],
+                        );
                     }
 
                     return $decoded;
 
                 case self::SERIALIZER_MSGPACK:
-                    if (function_exists('msgpack_unpack')) {
-                        return msgpack_unpack($data);
+                    if (function_exists("msgpack_unpack")) {
+                        return \msgpack_unpack($data);
                     }
                     return unserialize($data);
 
                 case self::SERIALIZER_IGBINARY:
-                    if (function_exists('igbinary_unserialize')) {
-                        return igbinary_unserialize($data);
+                    if (function_exists("igbinary_unserialize")) {
+                        return \igbinary_unserialize($data);
                     }
                     return unserialize($data);
 
@@ -350,7 +384,9 @@ final class Channel implements IteratorAggregate
                     return unserialize($data);
             }
         } catch (Exception $e) {
-            throw new Exception("Failed to unserialize data: " . $e->getMessage());
+            throw new Exception(
+                "Failed to unserialize data: " . $e->getMessage(),
+            );
         }
     }
 
@@ -367,14 +403,23 @@ final class Channel implements IteratorAggregate
         $data = [];
 
         // Get public properties
-        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+        foreach (
+            $reflection->getProperties(ReflectionProperty::IS_PUBLIC)
+            as $property
+        ) {
             $data[$property->getName()] = $property->getValue($object);
         }
 
         // Get properties via getter methods
-        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+        foreach (
+            $reflection->getMethods(ReflectionMethod::IS_PUBLIC)
+            as $method
+        ) {
             $methodName = $method->getName();
-            if (strpos($methodName, 'get') === 0 && $method->getNumberOfParameters() === 0) {
+            if (
+                strpos($methodName, "get") === 0 &&
+                $method->getNumberOfParameters() === 0
+            ) {
                 $propertyName = lcfirst(substr($methodName, 3));
                 if (!isset($data[$propertyName])) {
                     try {
@@ -403,7 +448,10 @@ final class Channel implements IteratorAggregate
         try {
             $object = $reflection->newInstanceWithoutConstructor();
 
-            foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+            foreach (
+                $reflection->getProperties(ReflectionProperty::IS_PUBLIC)
+                as $property
+            ) {
                 $propertyName = $property->getName();
                 if (array_key_exists($propertyName, $data)) {
                     $property->setValue($object, $data[$propertyName]);
@@ -411,10 +459,13 @@ final class Channel implements IteratorAggregate
             }
 
             foreach ($data as $key => $value) {
-                $setterName = 'set' . ucfirst($key);
+                $setterName = "set" . ucfirst($key);
                 if ($reflection->hasMethod($setterName)) {
                     $method = $reflection->getMethod($setterName);
-                    if ($method->isPublic() && $method->getNumberOfParameters() >= 1) {
+                    if (
+                        $method->isPublic() &&
+                        $method->getNumberOfParameters() >= 1
+                    ) {
                         try {
                             $method->invoke($object, $value);
                         } catch (Exception) {
@@ -428,13 +479,22 @@ final class Channel implements IteratorAggregate
         } catch (Exception) {
             try {
                 $constructor = $reflection->getConstructor();
-                if ($constructor && $constructor->getNumberOfParameters() === 0) {
+                if (
+                    $constructor &&
+                    $constructor->getNumberOfParameters() === 0
+                ) {
                     $object = $reflection->newInstance();
                 } else {
-                    $object = $this->createObjectWithConstructor($reflection, $data);
+                    $object = $this->createObjectWithConstructor(
+                        $reflection,
+                        $data,
+                    );
                 }
 
-                foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+                foreach (
+                    $reflection->getProperties(ReflectionProperty::IS_PUBLIC)
+                    as $property
+                ) {
                     $propertyName = $property->getName();
                     if (array_key_exists($propertyName, $data)) {
                         $property->setValue($object, $data[$propertyName]);
@@ -443,7 +503,10 @@ final class Channel implements IteratorAggregate
 
                 return $object;
             } catch (Exception $e2) {
-                throw new Exception("Failed to recreate object of class {$className}: " . $e2->getMessage());
+                throw new Exception(
+                    "Failed to recreate object of class {$className}: " .
+                        $e2->getMessage(),
+                );
             }
         }
     }
@@ -451,8 +514,10 @@ final class Channel implements IteratorAggregate
     /**
      * Create object with constructor parameters
      */
-    private function createObjectWithConstructor(ReflectionClass $reflection, array $data): object
-    {
+    private function createObjectWithConstructor(
+        ReflectionClass $reflection,
+        array $data,
+    ): object {
         $constructor = $reflection->getConstructor();
         if (!$constructor) {
             return $reflection->newInstance();
@@ -475,7 +540,7 @@ final class Channel implements IteratorAggregate
                     $paramName,
                     lcfirst($paramName),
                     ucfirst($paramName),
-                    strtolower($paramName)
+                    strtolower($paramName),
                 ];
 
                 $found = false;
@@ -488,7 +553,9 @@ final class Channel implements IteratorAggregate
                 }
 
                 if (!$found) {
-                    throw new Exception("Cannot find value for required parameter: {$paramName}");
+                    throw new Exception(
+                        "Cannot find value for required parameter: {$paramName}",
+                    );
                 }
             }
         }
@@ -509,31 +576,36 @@ final class Channel implements IteratorAggregate
     public function getSerializationInfo($data): array
     {
         $info = [
-            'type' => gettype($data),
-            'serializable' => $this->canSerialize($data),
-            'size_bytes' => 0,
-            'serializer' => $this->serializer,
-            'preserve_object_types' => $this->preserveObjectTypes,
+            "type" => gettype($data),
+            "serializable" => $this->canSerialize($data),
+            "size_bytes" => 0,
+            "serializer" => $this->serializer,
+            "preserve_object_types" => $this->preserveObjectTypes,
         ];
 
         if (is_object($data)) {
-            $info['class'] = get_class($data);
-            $info['implements_json_serializable'] = $data instanceof JsonSerializable;
-            $info['implements_serializable'] = $data instanceof Serializable;
+            $info["class"] = get_class($data);
+            $info["implements_json_serializable"] =
+                $data instanceof JsonSerializable;
+            $info["implements_serializable"] = $data instanceof Serializable;
 
             $reflection = new ReflectionClass($data);
-            $info['has_sleep_method'] = $reflection->hasMethod('__sleep');
-            $info['has_wakeup_method'] = $reflection->hasMethod('__wakeup');
-            $info['has_serialize_method'] = $reflection->hasMethod('__serialize');
-            $info['has_unserialize_method'] = $reflection->hasMethod('__unserialize');
+            $info["has_sleep_method"] = $reflection->hasMethod("__sleep");
+            $info["has_wakeup_method"] = $reflection->hasMethod("__wakeup");
+            $info["has_serialize_method"] = $reflection->hasMethod(
+                "__serialize",
+            );
+            $info["has_unserialize_method"] = $reflection->hasMethod(
+                "__unserialize",
+            );
         }
 
-        if ($info['serializable']) {
+        if ($info["serializable"]) {
             try {
                 $serialized = $this->serializeData($data);
-                $info['size_bytes'] = strlen($serialized);
+                $info["size_bytes"] = strlen($serialized);
             } catch (Exception) {
-                $info['size_bytes'] = 0;
+                $info["size_bytes"] = 0;
             }
         }
 
@@ -543,30 +615,32 @@ final class Channel implements IteratorAggregate
     public function testData($data): array
     {
         $result = [
-            'compatible' => false,
-            'info' => $this->getSerializationInfo($data),
-            'errors' => [],
-            'warnings' => []
+            "compatible" => false,
+            "info" => $this->getSerializationInfo($data),
+            "errors" => [],
+            "warnings" => [],
         ];
 
         try {
             $serialized = $this->serializeData($data);
             $unserialized = $this->unserializeData($serialized);
 
-            $result['compatible'] = true;
-            $result['serialized_size'] = strlen($serialized);
+            $result["compatible"] = true;
+            $result["serialized_size"] = strlen($serialized);
 
             if (is_object($data) && is_object($unserialized)) {
                 if (get_class($data) !== get_class($unserialized)) {
-                    $result['warnings'][] = 'Object class changed during serialization';
+                    $result["warnings"][] =
+                        "Object class changed during serialization";
                 }
             }
 
             if (strlen($serialized) > 1024 * 1024) {
-                $result['warnings'][] = 'Large data size may impact performance';
+                $result["warnings"][] =
+                    "Large data size may impact performance";
             }
         } catch (Exception $e) {
-            $result['errors'][] = $e->getMessage();
+            $result["errors"][] = $e->getMessage();
         }
 
         return $result;
@@ -575,14 +649,14 @@ final class Channel implements IteratorAggregate
     public static function getRecommendedSerializer($data): string
     {
         if (is_object($data)) {
-            if (function_exists('igbinary_serialize')) {
+            if (function_exists("igbinary_serialize")) {
                 return self::SERIALIZER_IGBINARY;
             }
             return self::SERIALIZER_SERIALIZE;
         }
 
         if (is_array($data) || is_scalar($data)) {
-            if (function_exists('msgpack_pack')) {
+            if (function_exists("msgpack_pack")) {
                 return self::SERIALIZER_MSGPACK;
             }
             return self::SERIALIZER_JSON;
@@ -601,9 +675,16 @@ final class Channel implements IteratorAggregate
         int $capacity = 0,
         string $serializer = self::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
-        bool $preserveObjectTypes = true
+        bool $preserveObjectTypes = true,
     ): Channel {
-        return new self($capacity, true, $channelName, $serializer, $tempDir, $preserveObjectTypes);
+        return new self(
+            $capacity,
+            true,
+            $channelName,
+            $serializer,
+            $tempDir,
+            $preserveObjectTypes,
+        );
     }
 
     public function send(mixed $value): void
@@ -623,7 +704,7 @@ final class Channel implements IteratorAggregate
 
         if (!empty($this->receiveQueue)) {
             $receiver = array_shift($this->receiveQueue);
-            $receiver['fiber']->resume($value);
+            $receiver["fiber"]->resume($value);
             return;
         }
 
@@ -638,8 +719,8 @@ final class Channel implements IteratorAggregate
         }
 
         $this->sendQueue[] = [
-            'fiber' => $currentFiber,
-            'value' => $value
+            "fiber" => $currentFiber,
+            "value" => $value,
         ];
 
         Fiber::suspend();
@@ -658,7 +739,10 @@ final class Channel implements IteratorAggregate
                 throw new Exception("Channel is closed");
             }
 
-            if (count($this->buffer) < $this->capacity || $this->capacity === 0) {
+            if (
+                count($this->buffer) < $this->capacity ||
+                $this->capacity === 0
+            ) {
                 $this->buffer[] = $value;
                 $this->saveChannelState();
                 $this->notifyReceivers();
@@ -683,11 +767,14 @@ final class Channel implements IteratorAggregate
                 throw new Exception("Channel is closed");
             }
 
-            if (count($this->buffer) < $this->capacity || $this->capacity === 0) {
+            if (
+                count($this->buffer) < $this->capacity ||
+                $this->capacity === 0
+            ) {
                 return;
             }
 
-            if ((microtime(true) * 1000 - $startTime) > $timeoutMs) {
+            if (microtime(true) * 1000 - $startTime > $timeoutMs) {
                 throw new Exception("Send timeout: buffer is full");
             }
 
@@ -711,8 +798,8 @@ final class Channel implements IteratorAggregate
 
             if (!empty($this->sendQueue)) {
                 $sender = array_shift($this->sendQueue);
-                $this->buffer[] = $sender['value'];
-                $sender['fiber']->resume();
+                $this->buffer[] = $sender["value"];
+                $sender["fiber"]->resume();
             }
 
             return $value;
@@ -728,7 +815,7 @@ final class Channel implements IteratorAggregate
         }
 
         $this->receiveQueue[] = [
-            'fiber' => $currentFiber
+            "fiber" => $currentFiber,
         ];
 
         return Fiber::suspend();
@@ -774,7 +861,7 @@ final class Channel implements IteratorAggregate
                 throw new Exception("Channel is closed and empty");
             }
 
-            if ((microtime(true) * 1000 - $startTime) > $timeoutMs) {
+            if (microtime(true) * 1000 - $startTime > $timeoutMs) {
                 throw new Exception("Receive timeout: no data available");
             }
 
@@ -799,7 +886,7 @@ final class Channel implements IteratorAggregate
 
         if (!empty($this->receiveQueue)) {
             $receiver = array_shift($this->receiveQueue);
-            $receiver['fiber']->resume($value);
+            $receiver["fiber"]->resume($value);
             return true;
         }
 
@@ -824,7 +911,10 @@ final class Channel implements IteratorAggregate
                 return false;
             }
 
-            if (count($this->buffer) < $this->capacity || $this->capacity === 0) {
+            if (
+                count($this->buffer) < $this->capacity ||
+                $this->capacity === 0
+            ) {
                 $this->buffer[] = $value;
                 $this->saveChannelState();
                 $this->notifyReceivers();
@@ -846,8 +936,8 @@ final class Channel implements IteratorAggregate
 
             if (!empty($this->sendQueue)) {
                 $sender = array_shift($this->sendQueue);
-                $this->buffer[] = $sender['value'];
-                $sender['fiber']->resume();
+                $this->buffer[] = $sender["value"];
+                $sender["fiber"]->resume();
             }
 
             return $value;
@@ -889,11 +979,11 @@ final class Channel implements IteratorAggregate
         $this->closed = true;
 
         foreach ($this->receiveQueue as $receiver) {
-            $receiver['fiber']->throw(new Exception("Channel is closed"));
+            $receiver["fiber"]->throw(new Exception("Channel is closed"));
         }
 
         foreach ($this->sendQueue as $sender) {
-            $sender['fiber']->throw(new Exception("Channel is closed"));
+            $sender["fiber"]->throw(new Exception("Channel is closed"));
         }
 
         $this->receiveQueue = [];
@@ -939,7 +1029,8 @@ final class Channel implements IteratorAggregate
         if ($this->interProcess && $this->bufferMutex) {
             return $this->bufferMutex->synchronized(function () {
                 $this->loadChannelState();
-                return count($this->buffer) >= $this->capacity && $this->capacity > 0;
+                return count($this->buffer) >= $this->capacity &&
+                    $this->capacity > 0;
             });
         }
 
@@ -966,16 +1057,16 @@ final class Channel implements IteratorAggregate
     public function getInfo(): array
     {
         return [
-            'capacity' => $this->capacity,
-            'size' => $this->size(),
-            'closed' => $this->isClosed(),
-            'inter_process' => $this->interProcess,
-            'channel_name' => $this->channelName,
-            'serializer' => $this->serializer,
-            'shared_memory_available' => $this->isSharedMemoryAvailable(),
-            'shared_memory_key' => $this->sharedMemoryKey,
-            'channel_file' => $this->channelFile,
-            'platform' => PHP_OS,
+            "capacity" => $this->capacity,
+            "size" => $this->size(),
+            "closed" => $this->isClosed(),
+            "inter_process" => $this->interProcess,
+            "channel_name" => $this->channelName,
+            "serializer" => $this->serializer,
+            "shared_memory_available" => $this->isSharedMemoryAvailable(),
+            "shared_memory_key" => $this->sharedMemoryKey,
+            "channel_file" => $this->channelFile,
+            "platform" => PHP_OS,
         ];
     }
 

@@ -51,6 +51,16 @@ final class Launch extends Job
     }
 
     /**
+     * Checks if there are any active tasks (in queue or being processed).
+     *
+     * @return bool True if there are active tasks, false otherwise.
+     */
+    public function hasActiveTasks(): bool
+    {
+        return !self::$queue->isEmpty() || !empty(self::$map);
+    }
+
+    /**
      * Creates a new asynchronous task. It runs concurrently with the main thread.
      *
      * @param callable|Generator|Async|Result|Fiber $callable The function or generator to run asynchronously.
@@ -59,7 +69,7 @@ final class Launch extends Job
      */
     public static function new(
         callable|Generator|Async|Result|Fiber $callable,
-        Dispatchers $dispatcher = Dispatchers::DEFAULT
+        Dispatchers $dispatcher = Dispatchers::DEFAULT,
     ): Launch {
         if ($dispatcher === Dispatchers::IO) {
             $callable = function () use ($callable) {
@@ -80,8 +90,9 @@ final class Launch extends Job
         return self::makeLaunch($callable);
     }
 
-    private static function makeLaunch(callable|Generator|Async|Result|Fiber $callable): Launch
-    {
+    private static function makeLaunch(
+        callable|Generator|Async|Result|Fiber $callable,
+    ): Launch {
         $fiber = FiberUtils::makeFiber($callable);
         $id = spl_object_id($fiber);
         $job = new self($id);
@@ -137,11 +148,16 @@ final class Launch extends Job
 
                 if (!$fiber->isTerminated()) {
                     $fiber->resume();
-                } else {
+                }
+
+                // Mark completed if fiber has terminated and job is still running
+                if ($fiber->isTerminated() && !$job->isFinal()) {
                     $job->complete();
                 }
             } catch (Throwable $e) {
-                $job->fail();
+                if (!$job->isFinal()) {
+                    $job->fail();
+                }
                 unset(self::$map[$job->id]);
                 throw $e;
             }

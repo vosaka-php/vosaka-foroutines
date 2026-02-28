@@ -11,7 +11,10 @@ final class Thread
      */
     public static function wait(): void
     {
-        while (!WorkerPool::isEmpty() || !Launch::getInstance()->isEmpty()) {
+        while (
+            !WorkerPool::isEmpty() ||
+            Launch::getInstance()->hasActiveTasks()
+        ) {
             WorkerPool::run();
             Launch::getInstance()->runOnce();
         }
