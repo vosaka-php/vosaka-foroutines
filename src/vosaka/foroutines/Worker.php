@@ -44,10 +44,10 @@ final class Worker
      */
     public function run(): Async
     {
-        if (ForkProcess::isForkAvailable()) {
-            $fork = new ForkProcess();
-            return $fork->run($this->closure);
-        }
+        // if (ForkProcess::isForkAvailable()) {
+        //     $fork = new ForkProcess();
+        //     return $fork->run($this->closure);
+        // }
 
         $process = new Process();
         return $process->run($this->closure);
