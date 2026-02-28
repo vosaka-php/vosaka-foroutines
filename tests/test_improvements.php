@@ -37,13 +37,13 @@ function test(string $name, callable $fn): void
 {
     global $passed, $failed, $testNames;
     $testNames[] = $name;
-    echo "\n  ▶ {$name} ... ";
+    echo "\n  > {$name} ... ";
     try {
         $fn();
-        echo "✅ PASS";
+        echo "[PASS]";
         $passed++;
     } catch (\Throwable $e) {
-        echo "❌ FAIL: " . $e->getMessage();
+        echo "[FAIL]: " . $e->getMessage();
         echo "\n    at " . $e->getFile() . ":" . $e->getLine();
         $failed++;
     }
@@ -53,7 +53,7 @@ function skip(string $name, string $reason): void
 {
     global $skipped, $testNames;
     $testNames[] = $name;
-    echo "\n  ⏭ {$name} ... SKIPPED ({$reason})";
+    echo "\n  - {$name} ... SKIPPED ({$reason})";
     $skipped++;
 }
 
@@ -125,16 +125,16 @@ function assert_throws(
 
 // ─── Banner ──────────────────────────────────────────────────────────────────
 
-echo "╔══════════════════════════════════════════════════════════════╗\n";
-echo "║   VOsaka Foroutines — Improvement Test Suite                ║\n";
-echo "║   Testing: Idle Sleep, AsyncIO, ForkProcess, Backpressure   ║\n";
-echo "╚══════════════════════════════════════════════════════════════╝\n";
+echo "+--------------------------------------------------------------+\n";
+echo "|   VOsaka Foroutines -- Improvement Test Suite                |\n";
+echo "|   Testing: Idle Sleep, AsyncIO, ForkProcess, Backpressure    |\n";
+echo "+--------------------------------------------------------------+\n";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // IMPROVEMENT 1: Idle Sleep — Thread::wait(), RunBlocking, Delay
 // ═════════════════════════════════════════════════════════════════════════════
 
-echo "\n\n━━━ IMPROVEMENT 1: Idle Sleep (anti CPU-spin) ━━━";
+echo "\n\n--- IMPROVEMENT 1: Idle Sleep (anti CPU-spin) ---";
 
 main(function () {
     test("Thread::wait completes without hanging", function () {
@@ -247,7 +247,7 @@ main(function () {
 // IMPROVEMENT 2: AsyncIO — Non-blocking stream I/O via stream_select()
 // ═════════════════════════════════════════════════════════════════════════════
 
-echo "\n\n━━━ IMPROVEMENT 2: AsyncIO (non-blocking stream I/O) ━━━";
+echo "\n\n--- IMPROVEMENT 2: AsyncIO (non-blocking stream I/O) ---";
 
 main(function () {
     test("AsyncIO::hasPending returns false initially", function () {
@@ -520,7 +520,7 @@ main(function () {
 // IMPROVEMENT 3: ForkProcess — pcntl_fork() on Linux, fallback on Windows
 // ═════════════════════════════════════════════════════════════════════════════
 
-echo "\n\n━━━ IMPROVEMENT 3: ForkProcess (pcntl_fork / fallback) ━━━";
+echo "\n\n--- IMPROVEMENT 3: ForkProcess (pcntl_fork / fallback) ---";
 
 main(function () {
     test("ForkProcess::isForkAvailable returns bool", function () {
@@ -742,7 +742,7 @@ main(function () {
 // IMPROVEMENT 4: Backpressure — SharedFlow, StateFlow, MutableStateFlow, Flow
 // ═════════════════════════════════════════════════════════════════════════════
 
-echo "\n\n━━━ IMPROVEMENT 4: Backpressure (Flow/SharedFlow/StateFlow) ━━━";
+echo "\n\n--- IMPROVEMENT 4: Backpressure (Flow/SharedFlow/StateFlow) ---";
 
 main(function () {
     // ─── BackpressureStrategy enum tests ─────────────────────────────
@@ -1387,15 +1387,15 @@ main(function () {
 // ═════════════════════════════════════════════════════════════════════════════
 
 echo "\n\n";
-echo "══════════════════════════════════════════════════════════════\n";
+echo "==============================================================\n";
 echo "  RESULTS: {$passed} passed, {$failed} failed, {$skipped} skipped";
 echo " (total: " . ($passed + $failed + $skipped) . ")\n";
-echo "══════════════════════════════════════════════════════════════\n";
+echo "==============================================================\n";
 
 if ($failed > 0) {
-    echo "\n  ⚠️  Some tests failed! Review output above for details.\n";
+    echo "\n  Some tests failed! Review output above for details.\n";
     exit(1);
 } else {
-    echo "\n  🎉 All tests passed!\n";
+    echo "\n  All tests passed!\n";
     exit(0);
 }
