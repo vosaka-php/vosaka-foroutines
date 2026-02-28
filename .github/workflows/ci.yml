@@ -1,131 +1,134 @@
 name: CI
 
 on:
-  push:
-    branches: [main, master, develop]
-  pull_request:
-    branches: [main, master, develop]
+    push:
+        branches: [main, master, develop]
+    pull_request:
+        branches: [main, master, develop]
 
 jobs:
-  test:
-    name: PHP ${{ matrix.php }} / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        php: ['8.1', '8.2', '8.3', '8.4']
+    test:
+        name: PHP ${{ matrix.php }} / ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, windows-latest]
+                php: ["8.1", "8.2", "8.3", "8.4"]
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: shmop, fileinfo, zlib, pcntl, sysvsem, posix
-          ini-values: max_execution_time=120
-          coverage: none
-        env:
-          fail-fast: true
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php }}
+                  extensions: shmop, fileinfo, zlib, pcntl, sysvsem, posix
+                  ini-values: max_execution_time=120
+                  coverage: none
+              env:
+                  fail-fast: true
 
-      - name: Setup PHP (Windows — no pcntl/sysvsem)
-        if: runner.os == 'Windows'
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: shmop, fileinfo, zlib
-          ini-values: max_execution_time=120
-          coverage: none
+            - name: Setup PHP (Windows — no pcntl/sysvsem)
+              if: runner.os == 'Windows'
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php }}
+                  extensions: shmop, fileinfo, zlib
+                  ini-values: max_execution_time=120
+                  coverage: none
 
-      - name: Validate composer.json
-        run: composer validate --strict
+            - name: Update composer
+              run: composer update
 
-      - name: Install dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
+            - name: Validate composer.json
+              run: composer validate --strict
 
-      - name: Run improvement test suite
-        run: php tests/test_improvements.php
+            - name: Install dependencies
+              run: composer install --prefer-dist --no-interaction --no-progress
 
-      - name: Run basic tests
-        working-directory: tests
-        run: php basic.php
+            - name: Run improvement test suite
+              run: php tests/test_improvements.php
 
-      - name: Run channel tests
-        working-directory: tests
-        run: php test_channel.php
+            - name: Run basic tests
+              working-directory: tests
+              run: php basic.php
 
-      - name: Run delay tests
-        working-directory: tests
-        run: php test_delay.php
+            - name: Run channel tests
+              working-directory: tests
+              run: php test_channel.php
 
-      - name: Run mutex tests
-        working-directory: tests
-        run: php test_mutex.php
+            - name: Run delay tests
+              working-directory: tests
+              run: php test_delay.php
 
-      - name: Run shared/state flow tests
-        working-directory: tests
-        run: php test_shared_state_flow.php
+            - name: Run mutex tests
+              working-directory: tests
+              run: php test_mutex.php
 
-      - name: Run job lifecycle tests
-        working-directory: tests
-        run: php test_job_lifecycle.php
+            - name: Run shared/state flow tests
+              working-directory: tests
+              run: php test_shared_state_flow.php
 
-      - name: Run error handling tests
-        working-directory: tests
-        run: php test_error_handling.php
+            - name: Run job lifecycle tests
+              working-directory: tests
+              run: php test_job_lifecycle.php
 
-      - name: Run async wait tests
-        working-directory: tests
-        run: php test_async_wait.php
+            - name: Run error handling tests
+              working-directory: tests
+              run: php test_error_handling.php
 
-      - name: Run select tests
-        working-directory: tests
-        run: php test_select.php
+            - name: Run async wait tests
+              working-directory: tests
+              run: php test_async_wait.php
 
-      - name: Run structured concurrency tests
-        working-directory: tests
-        run: php test_structured_concurrency.php
+            - name: Run select tests
+              working-directory: tests
+              run: php test_select.php
 
-      - name: Run timeout tests
-        working-directory: tests
-        run: php test_with_timeout.php
+            - name: Run structured concurrency tests
+              working-directory: tests
+              run: php test_structured_concurrency.php
 
-      - name: Run event loop tests
-        working-directory: tests
-        run: php test_event_loop.php
+            - name: Run timeout tests
+              working-directory: tests
+              run: php test_with_timeout.php
 
-      - name: Run repeat tests
-        working-directory: tests
-        run: php test_repeat.php
+            - name: Run event loop tests
+              working-directory: tests
+              run: php test_event_loop.php
 
-      - name: Run channels utils tests
-        working-directory: tests
-        run: php test_channels_utils.php
+            - name: Run repeat tests
+              working-directory: tests
+              run: php test_repeat.php
 
-      - name: Run dispatchers tests
-        working-directory: tests
-        run: php test_dispatchers.php
+            - name: Run channels utils tests
+              working-directory: tests
+              run: php test_channels_utils.php
 
-      - name: Run IO tests
-        working-directory: tests
-        run: php test_io.php
+            - name: Run dispatchers tests
+              working-directory: tests
+              run: php test_dispatchers.php
 
-      - name: Verify ForkProcess availability (Linux only)
-        if: runner.os == 'Linux'
-        run: |
-          php -r "
-            require 'vendor/autoload.php';
-            use vosaka\foroutines\ForkProcess;
-            if (!ForkProcess::isForkAvailable()) {
-              echo \"ERROR: pcntl_fork should be available on Linux CI\n\";
-              exit(1);
-            }
-            echo \"OK: ForkProcess using pcntl_fork()\n\";
-          "
+            - name: Run IO tests
+              working-directory: tests
+              run: php test_io.php
 
-      - name: Verify ForkProcess fallback (Windows only)
-        if: runner.os == 'Windows'
-        run: |
-          php -r "require 'vendor/autoload.php'; use vosaka\foroutines\ForkProcess; if (ForkProcess::isForkAvailable()) { echo 'ERROR: pcntl should NOT be available on Windows'; exit(1); } echo 'OK: ForkProcess will use symfony/process fallback' . PHP_EOL;"
+            - name: Verify ForkProcess availability (Linux only)
+              if: runner.os == 'Linux'
+              run: |
+                  php -r "
+                    require 'vendor/autoload.php';
+                    use vosaka\foroutines\ForkProcess;
+                    if (!ForkProcess::isForkAvailable()) {
+                      echo \"ERROR: pcntl_fork should be available on Linux CI\n\";
+                      exit(1);
+                    }
+                    echo \"OK: ForkProcess using pcntl_fork()\n\";
+                  "
+
+            - name: Verify ForkProcess fallback (Windows only)
+              if: runner.os == 'Windows'
+              run: |
+                  php -r "require 'vendor/autoload.php'; use vosaka\foroutines\ForkProcess; if (ForkProcess::isForkAvailable()) { echo 'ERROR: pcntl should NOT be available on Windows'; exit(1); } echo 'OK: ForkProcess will use symfony/process fallback' . PHP_EOL;"
