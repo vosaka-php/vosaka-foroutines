@@ -52,9 +52,10 @@ final class Async
      *
      * When called from a non-Fiber context (e.g. top-level code or inside a
      * child process), it runs the inner fiber in a tight blocking loop with
-     * cooperative scheduling calls (WorkerPool::run + Launch::runOnce) to
-     * avoid deadlocking — Pause::new() would be a no-op in non-Fiber context
-     * and Fiber::suspend() cannot be called outside a Fiber.
+     * cooperative scheduling calls (AsyncIO::pollOnce + WorkerPool::run +
+     * Launch::runOnce) to avoid deadlocking — Pause::new() would be a no-op
+     * in non-Fiber context and Fiber::suspend() cannot be called outside a
+     * Fiber.
      *
      * @return mixed The result of the asynchronous task.
      */
@@ -73,7 +74,8 @@ final class Async
 
         // We are NOT inside a Fiber (top-level or child-process context).
         // Run a blocking loop that manually drives the scheduler so that
-        // WorkerPool workers and Launch jobs can make progress.
+        // WorkerPool workers, Launch jobs, and AsyncIO watchers can make
+        // progress.
         return $this->waitOutsideFiber();
     }
 
@@ -109,28 +111,56 @@ final class Async
      *
      * Since Pause::new() is effectively a no-op outside a Fiber (it cannot
      * call Fiber::suspend()), we manually drive the scheduler by calling
-     * WorkerPool::run() and Launch::runOnce() in a tight loop.
+     * AsyncIO::pollOnce(), WorkerPool::run(), and Launch::runOnce() in a
+     * loop.
      *
-     * A small usleep(1000) (1 ms) is added per iteration to:
+     * A small usleep(500) is added on idle iterations (where none of the
+     * three subsystems had actionable work) to:
      *   - Prevent 100% CPU spin
      *   - Give child processes real wall-clock time to advance
      *   - Allow the OS scheduler to run child processes
+     *   - Let stream_select() in AsyncIO detect readiness
      */
     private function waitOutsideFiber(): mixed
     {
         while (!$this->fiber->isTerminated()) {
+            $didWork = false;
+
+            // Drive non-blocking stream I/O — poll all registered
+            // read/write watchers via stream_select() and resume
+            // fibers whose streams became ready.
+            if (AsyncIO::hasPending()) {
+                if (AsyncIO::pollOnce()) {
+                    $didWork = true;
+                }
+            }
+
             // Drive the cooperative scheduler manually since we cannot
             // Fiber::suspend() from here.
-            WorkerPool::run();
-            Launch::getInstance()->runOnce();
+            if (!WorkerPool::isEmpty()) {
+                WorkerPool::run();
+                $didWork = true;
+            }
+
+            if (Launch::getInstance()->hasActiveTasks()) {
+                Launch::getInstance()->runOnce();
+                $didWork = true;
+            }
 
             if ($this->fiber->isSuspended()) {
                 $this->fiber->resume();
+                $didWork = true;
             }
 
             if (!$this->fiber->isTerminated()) {
-                // Small sleep to avoid CPU spin and give child processes time
-                usleep(1000);
+                // Only sleep when no subsystem had actionable work this
+                // tick. When work IS happening, fibers yield naturally,
+                // so we don't need extra delay. When idle (e.g. waiting
+                // for a child process to finish or a stream to become
+                // ready), the sleep prevents a hot spin loop.
+                if (!$didWork) {
+                    usleep(500);
+                }
             }
         }
 

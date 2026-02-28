@@ -1,8 +1,19 @@
 {
     "name": "venndev/vosaka-fourotines",
-    "description": "The library makes it easy to include Kotlin-oriented syntax in PHP asynchronous programming. Can integrate with VOsaka.",
+    "description": "Structured async programming for PHP using Fibers, inspired by Kotlin Coroutines. Features AsyncIO (non-blocking streams), ForkProcess (low-overhead child processes), Flow/SharedFlow/StateFlow with backpressure, Channels, Mutex, and cooperative scheduling. Can integrate with VOsaka.",
     "type": "library",
     "license": "MIT",
+    "keywords": [
+        "async",
+        "fibers",
+        "coroutines",
+        "concurrency",
+        "non-blocking",
+        "flow",
+        "channel",
+        "backpressure",
+        "kotlin"
+    ],
     "autoload": {
         "psr-4": {
             "vosaka\\foroutines\\": "src/vosaka/foroutines/"
@@ -18,10 +29,18 @@
         }
     ],
     "require": {
-        "symfony/process": "^7.3",        
+        "php": ">=8.1",
+        "symfony/process": "^7.3",
         "laravel/serializable-closure": "^2.0",
         "ext-shmop": "*",
         "ext-fileinfo": "*",
         "ext-zlib": "*"
+    },
+    "suggest": {
+        "ext-pcntl": "Enables ForkProcess for low-overhead IO dispatch via pcntl_fork() (~1-5ms vs ~50-200ms). Linux/macOS only.",
+        "ext-posix": "Used by ForkProcess for immediate child exit via posix_kill(). Linux/macOS only.",
+        "ext-sysvsem": "Enables semaphore-based Mutex locking (faster than file locks). Linux/macOS only.",
+        "ext-apcu": "Enables APCu-based Mutex locking (in-memory, very fast). Requires APCu extension.",
+        "ext-event": "Future: potential integration for epoll/kqueue-based event loop (not yet used)."
     }
 }
