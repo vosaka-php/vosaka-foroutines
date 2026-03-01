@@ -102,32 +102,32 @@ final class AsyncIO
         $readStreams = [];
         $readMap = [];
         foreach (self::$readWatchers as $id => $watcher) {
-            if (!is_resource($watcher['stream']) || feof($watcher['stream'])) {
+            if (!is_resource($watcher["stream"]) || feof($watcher["stream"])) {
                 // Stream closed or EOF — resume fiber so it can handle it
-                $fiber = $watcher['fiber'];
+                $fiber = $watcher["fiber"];
                 unset(self::$readWatchers[$id]);
                 if ($fiber->isSuspended()) {
                     $fiber->resume(false); // signal EOF/error
                 }
                 continue;
             }
-            $readStreams[$id] = $watcher['stream'];
-            $readMap[(int) $watcher['stream']] = $id;
+            $readStreams[$id] = $watcher["stream"];
+            $readMap[(int) $watcher["stream"]] = $id;
         }
 
         $writeStreams = [];
         $writeMap = [];
         foreach (self::$writeWatchers as $id => $watcher) {
-            if (!is_resource($watcher['stream'])) {
-                $fiber = $watcher['fiber'];
+            if (!is_resource($watcher["stream"])) {
+                $fiber = $watcher["fiber"];
                 unset(self::$writeWatchers[$id]);
                 if ($fiber->isSuspended()) {
                     $fiber->resume(false);
                 }
                 continue;
             }
-            $writeStreams[$id] = $watcher['stream'];
-            $writeMap[(int) $watcher['stream']] = $id;
+            $writeStreams[$id] = $watcher["stream"];
+            $writeMap[(int) $watcher["stream"]] = $id;
         }
 
         if (empty($readStreams) && empty($writeStreams)) {
@@ -160,7 +160,7 @@ final class AsyncIO
                 if (isset($readMap[$streamId])) {
                     $watcherId = $readMap[$streamId];
                     if (isset(self::$readWatchers[$watcherId])) {
-                        $fiber = self::$readWatchers[$watcherId]['fiber'];
+                        $fiber = self::$readWatchers[$watcherId]["fiber"];
                         unset(self::$readWatchers[$watcherId]);
                         if ($fiber->isSuspended()) {
                             $fiber->resume(true); // signal: stream is ready
@@ -178,7 +178,7 @@ final class AsyncIO
                 if (isset($writeMap[$streamId])) {
                     $watcherId = $writeMap[$streamId];
                     if (isset(self::$writeWatchers[$watcherId])) {
-                        $fiber = self::$writeWatchers[$watcherId]['fiber'];
+                        $fiber = self::$writeWatchers[$watcherId]["fiber"];
                         unset(self::$writeWatchers[$watcherId]);
                         if ($fiber->isSuspended()) {
                             $fiber->resume(true);
@@ -198,6 +198,21 @@ final class AsyncIO
     public static function hasPending(): bool
     {
         return !empty(self::$readWatchers) || !empty(self::$writeWatchers);
+    }
+
+    /**
+     * Resets all static watcher state to initial values.
+     *
+     * This is used by ForkProcess after pcntl_fork() to clear stale
+     * read/write watchers inherited from the parent process. Stream
+     * resources and their associated Fibers are meaningless in the
+     * child's address space and would cause hasPending() to return
+     * true indefinitely, preventing Thread::wait() from terminating.
+     */
+    public static function resetState(): void
+    {
+        self::$readWatchers = [];
+        self::$writeWatchers = [];
     }
 
     /**
@@ -234,15 +249,15 @@ final class AsyncIO
         $fiber = Fiber::getCurrent();
         if ($fiber === null) {
             throw new RuntimeException(
-                'AsyncIO::waitForRead() must be called from within a Fiber. ' .
-                'Wrap your code in Launch::new() or Async::new().',
+                "AsyncIO::waitForRead() must be called from within a Fiber. " .
+                    "Wrap your code in Launch::new() or Async::new().",
             );
         }
 
         $id = self::$nextId++;
         self::$readWatchers[$id] = [
-            'stream' => $stream,
-            'fiber' => $fiber,
+            "stream" => $stream,
+            "fiber" => $fiber,
         ];
 
         // Suspend — the scheduler's pollOnce() will resume us
@@ -261,15 +276,15 @@ final class AsyncIO
         $fiber = Fiber::getCurrent();
         if ($fiber === null) {
             throw new RuntimeException(
-                'AsyncIO::waitForWrite() must be called from within a Fiber. ' .
-                'Wrap your code in Launch::new() or Async::new().',
+                "AsyncIO::waitForWrite() must be called from within a Fiber. " .
+                    "Wrap your code in Launch::new() or Async::new().",
             );
         }
 
         $id = self::$nextId++;
         self::$writeWatchers[$id] = [
-            'stream' => $stream,
-            'fiber' => $fiber,
+            "stream" => $stream,
+            "fiber" => $fiber,
         ];
 
         return (bool) Fiber::suspend();
@@ -322,7 +337,7 @@ final class AsyncIO
             if ($ready) {
                 // Verify the connection actually succeeded
                 $error = socket_get_status($socket);
-                if (!empty($error['timed_out'])) {
+                if (!empty($error["timed_out"])) {
                     fclose($socket);
                     throw new RuntimeException(
                         "TCP connection to {$address} timed out",
@@ -357,12 +372,12 @@ final class AsyncIO
         $address = "tls://{$host}:{$port}";
 
         $context = stream_context_create([
-            'ssl' => [
-                'verify_peer' => true,
-                'verify_peer_name' => true,
-                'allow_self_signed' => false,
-                'SNI_enabled' => true,
-                'peer_name' => $host,
+            "ssl" => [
+                "verify_peer" => true,
+                "verify_peer_name" => true,
+                "allow_self_signed" => false,
+                "SNI_enabled" => true,
+                "peer_name" => $host,
             ],
         ]);
 
@@ -403,7 +418,9 @@ final class AsyncIO
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
     ): string {
         if (!is_resource($stream)) {
-            throw new InvalidArgumentException('Expected a valid stream resource');
+            throw new InvalidArgumentException(
+                "Expected a valid stream resource",
+            );
         }
 
         stream_set_blocking($stream, false);
@@ -419,7 +436,7 @@ final class AsyncIO
             }
 
             if (feof($stream)) {
-                return '';
+                return "";
             }
 
             if (microtime(true) - $start >= $timeoutSeconds) {
@@ -431,7 +448,7 @@ final class AsyncIO
             // No data yet — register watcher and suspend
             $ready = self::waitForRead($stream);
             if (!$ready) {
-                return ''; // EOF or stream closed
+                return ""; // EOF or stream closed
             }
         }
     }
@@ -448,7 +465,7 @@ final class AsyncIO
         $stream,
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
     ): string {
-        $buffer = '';
+        $buffer = "";
         $start = microtime(true);
 
         while (true) {
@@ -458,7 +475,7 @@ final class AsyncIO
                 $timeoutSeconds - (microtime(true) - $start),
             );
 
-            if ($chunk === '') {
+            if ($chunk === "") {
                 break; // EOF
             }
 
@@ -467,7 +484,8 @@ final class AsyncIO
             if (microtime(true) - $start >= $timeoutSeconds) {
                 throw new RuntimeException(
                     "streamReadAll timed out after {$timeoutSeconds}s (read " .
-                    strlen($buffer) . ' bytes so far)',
+                        strlen($buffer) .
+                        " bytes so far)",
                 );
             }
         }
@@ -493,7 +511,9 @@ final class AsyncIO
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
     ): int {
         if (!is_resource($stream)) {
-            throw new InvalidArgumentException('Expected a valid stream resource');
+            throw new InvalidArgumentException(
+                "Expected a valid stream resource",
+            );
         }
 
         stream_set_blocking($stream, false);
@@ -520,7 +540,7 @@ final class AsyncIO
             if (microtime(true) - $start >= $timeoutSeconds) {
                 throw new RuntimeException(
                     "Stream write timed out after {$timeoutSeconds}s " .
-                    "({$written}/{$totalLength} bytes written)",
+                        "({$written}/{$totalLength} bytes written)",
                 );
             }
 
@@ -558,20 +578,20 @@ final class AsyncIO
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
     ): string {
         $parsed = parse_url($url);
-        if ($parsed === false || !isset($parsed['host'])) {
+        if ($parsed === false || !isset($parsed["host"])) {
             throw new InvalidArgumentException("Invalid URL: {$url}");
         }
 
-        $scheme = strtolower($parsed['scheme'] ?? 'http');
-        $host = $parsed['host'];
-        $port = $parsed['port'] ?? ($scheme === 'https' ? 443 : 80);
-        $path = ($parsed['path'] ?? '/');
-        if (isset($parsed['query'])) {
-            $path .= '?' . $parsed['query'];
+        $scheme = strtolower($parsed["scheme"] ?? "http");
+        $host = $parsed["host"];
+        $port = $parsed["port"] ?? ($scheme === "https" ? 443 : 80);
+        $path = $parsed["path"] ?? "/";
+        if (isset($parsed["query"])) {
+            $path .= "?" . $parsed["query"];
         }
 
         // Connect
-        if ($scheme === 'https') {
+        if ($scheme === "https") {
             $socket = self::tlsConnect($host, $port, $timeoutSeconds);
         } else {
             $socket = self::tcpConnect($host, $port, $timeoutSeconds);
@@ -590,7 +610,7 @@ final class AsyncIO
         $request .= "\r\n";
 
         // Send
-        $remainingTimeout = $timeoutSeconds - (microtime(true));
+        $remainingTimeout = $timeoutSeconds - microtime(true);
         self::streamWrite($socket, $request, max(1.0, $timeoutSeconds / 2));
 
         // Read full response
@@ -607,7 +627,7 @@ final class AsyncIO
         $body = substr($response, $headerEnd + 4);
 
         // Handle chunked transfer encoding
-        if (stripos($responseHeaders, 'Transfer-Encoding: chunked') !== false) {
+        if (stripos($responseHeaders, "Transfer-Encoding: chunked") !== false) {
             $body = self::decodeChunked($body);
         }
 
@@ -629,23 +649,23 @@ final class AsyncIO
         string $url,
         string $body,
         array $headers = [],
-        string $contentType = 'application/json',
+        string $contentType = "application/json",
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
     ): string {
         $parsed = parse_url($url);
-        if ($parsed === false || !isset($parsed['host'])) {
+        if ($parsed === false || !isset($parsed["host"])) {
             throw new InvalidArgumentException("Invalid URL: {$url}");
         }
 
-        $scheme = strtolower($parsed['scheme'] ?? 'http');
-        $host = $parsed['host'];
-        $port = $parsed['port'] ?? ($scheme === 'https' ? 443 : 80);
-        $path = ($parsed['path'] ?? '/');
-        if (isset($parsed['query'])) {
-            $path .= '?' . $parsed['query'];
+        $scheme = strtolower($parsed["scheme"] ?? "http");
+        $host = $parsed["host"];
+        $port = $parsed["port"] ?? ($scheme === "https" ? 443 : 80);
+        $path = $parsed["path"] ?? "/";
+        if (isset($parsed["query"])) {
+            $path .= "?" . $parsed["query"];
         }
 
-        if ($scheme === 'https') {
+        if ($scheme === "https") {
             $socket = self::tlsConnect($host, $port, $timeoutSeconds);
         } else {
             $socket = self::tcpConnect($host, $port, $timeoutSeconds);
@@ -677,7 +697,7 @@ final class AsyncIO
         $responseHeaders = substr($response, 0, $headerEnd);
         $responseBody = substr($response, $headerEnd + 4);
 
-        if (stripos($responseHeaders, 'Transfer-Encoding: chunked') !== false) {
+        if (stripos($responseHeaders, "Transfer-Encoding: chunked") !== false) {
             $responseBody = self::decodeChunked($responseBody);
         }
 
@@ -702,14 +722,14 @@ final class AsyncIO
      */
     public static function fileGetContents(string $filePath): string
     {
-        $stream = @fopen($filePath, 'rb');
+        $stream = @fopen($filePath, "rb");
         if ($stream === false) {
             throw new RuntimeException("Cannot open file: {$filePath}");
         }
 
         stream_set_blocking($stream, false);
 
-        $buffer = '';
+        $buffer = "";
         while (!feof($stream)) {
             $chunk = @fread($stream, self::READ_CHUNK_SIZE);
 
@@ -741,11 +761,13 @@ final class AsyncIO
         string $data,
         int $flags = 0,
     ): int {
-        $mode = ($flags & FILE_APPEND) ? 'ab' : 'wb';
+        $mode = $flags & FILE_APPEND ? "ab" : "wb";
 
         $stream = @fopen($filePath, $mode);
         if ($stream === false) {
-            throw new RuntimeException("Cannot open file for writing: {$filePath}");
+            throw new RuntimeException(
+                "Cannot open file for writing: {$filePath}",
+            );
         }
 
         if ($flags & LOCK_EX) {
@@ -812,7 +834,9 @@ final class AsyncIO
 
         if ($ip === $hostname) {
             // gethostbyname returns the hostname unchanged on failure
-            throw new RuntimeException("DNS resolution failed for: {$hostname}");
+            throw new RuntimeException(
+                "DNS resolution failed for: {$hostname}",
+            );
         }
 
         return $ip;
@@ -828,7 +852,7 @@ final class AsyncIO
      */
     private static function decodeChunked(string $data): string
     {
-        $decoded = '';
+        $decoded = "";
         $pos = 0;
         $length = strlen($data);
 
@@ -843,7 +867,7 @@ final class AsyncIO
             $chunkSizeHex = trim(substr($data, $pos, $lineEnd - $pos));
 
             // Handle chunk extensions (e.g., "1a;ext=value")
-            $semiPos = strpos($chunkSizeHex, ';');
+            $semiPos = strpos($chunkSizeHex, ";");
             if ($semiPos !== false) {
                 $chunkSizeHex = substr($chunkSizeHex, 0, $semiPos);
             }
@@ -873,7 +897,7 @@ final class AsyncIO
      */
     public static function createSocketPair(): array
     {
-        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        if (strtoupper(substr(PHP_OS, 0, 3)) === "WIN") {
             // Windows: use a loopback TCP pair
             return self::createWindowsSocketPair();
         }
@@ -886,7 +910,7 @@ final class AsyncIO
         );
 
         if ($pair === false) {
-            throw new RuntimeException('Failed to create Unix socket pair');
+            throw new RuntimeException("Failed to create Unix socket pair");
         }
 
         stream_set_blocking($pair[0], false);
@@ -903,11 +927,7 @@ final class AsyncIO
      */
     private static function createWindowsSocketPair(): array
     {
-        $server = @stream_socket_server(
-            'tcp://127.0.0.1:0',
-            $errno,
-            $errstr,
-        );
+        $server = @stream_socket_server("tcp://127.0.0.1:0", $errno, $errstr);
 
         if ($server === false) {
             throw new RuntimeException(
@@ -936,7 +956,7 @@ final class AsyncIO
 
         if ($accepted === false) {
             fclose($client);
-            throw new RuntimeException('Failed to accept loopback connection');
+            throw new RuntimeException("Failed to accept loopback connection");
         }
 
         stream_set_blocking($client, false);

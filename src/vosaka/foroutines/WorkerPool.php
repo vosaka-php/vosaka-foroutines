@@ -24,6 +24,23 @@ final class WorkerPool
     public function __construct() {}
 
     /**
+     * Resets all static state to initial values.
+     *
+     * This is used by ForkProcess after pcntl_fork() to clear stale
+     * workers, returns, and running counts inherited from the parent
+     * process. Without this, the child process would see phantom
+     * entries from the parent's WorkerPool and either spin forever
+     * in Thread::wait() or attempt to drive workers that don't exist
+     * in the child's address space.
+     */
+    public static function resetState(): void
+    {
+        self::$workers = [];
+        self::$returns = [];
+        self::$running = 0;
+    }
+
+    /**
      * Checks if the worker pool is empty.
      */
     public static function isEmpty(): bool

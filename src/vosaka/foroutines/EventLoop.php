@@ -12,6 +12,20 @@ final class EventLoop
 {
     private static ?SplPriorityQueue $queue = null;
 
+    /**
+     * Resets the event loop state to initial values.
+     *
+     * This is used by ForkProcess after pcntl_fork() to clear stale
+     * fibers inherited from the parent process. Without this, the
+     * shutdown function registered by init() would attempt to run
+     * parent fibers in the child process, causing errors or hangs
+     * during child exit.
+     */
+    public static function resetState(): void
+    {
+        self::$queue = null;
+    }
+
     public function __construct()
     {
         self::init();
@@ -26,8 +40,12 @@ final class EventLoop
                 try {
                     self::runAll();
                 } catch (Throwable $e) {
-                    error_log('Error during EventLoop shutdown: ' . $e->getMessage() . "\n" .
-                        $e->getTraceAsString());
+                    error_log(
+                        "Error during EventLoop shutdown: " .
+                            $e->getMessage() .
+                            "\n" .
+                            $e->getTraceAsString(),
+                    );
                 }
             });
         }

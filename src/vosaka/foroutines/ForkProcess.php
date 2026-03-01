@@ -233,6 +233,21 @@ final class ForkProcess
         string $tempFile,
     ): never {
         try {
+            // Reset static scheduler state inherited from the parent
+            // process. After fork(), the child gets a copy of the
+            // parent's entire memory space, including Launch::$queue,
+            // Launch::$map, WorkerPool's internal arrays, and AsyncIO's
+            // read/write watchers. These contain stale fibers/jobs/
+            // streams from the parent that are meaningless in the child.
+            // If not cleared, Thread::wait() or any scheduler loop
+            // running inside the child closure will see these phantom
+            // entries and spin forever.
+            Launch::$queue = new \SplQueue();
+            Launch::$map = [];
+            WorkerPool::resetState();
+            AsyncIO::resetState();
+            EventLoop::resetState();
+
             // Execute the user's closure
             $result = $closure();
 
