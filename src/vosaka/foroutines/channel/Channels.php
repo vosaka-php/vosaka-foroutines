@@ -17,7 +17,9 @@ final class Channels
     public static function createBuffered(int $capacity): Channel
     {
         if ($capacity <= 0) {
-            throw new Exception("Buffered channel capacity must be greater than 0");
+            throw new Exception(
+                "Buffered channel capacity must be greater than 0",
+            );
         }
         return new Channel($capacity);
     }
@@ -30,13 +32,19 @@ final class Channels
         int $capacity = 0,
         string $serializer = Channel::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
-        bool $preserveObjectTypes = true
+        bool $preserveObjectTypes = true,
     ): Channel {
         if (empty($channelName)) {
             throw new Exception("Channel name cannot be empty");
         }
 
-        return Channel::newInterProcess($channelName, $capacity, $serializer, $tempDir, $preserveObjectTypes);
+        return Channel::newInterProcess(
+            $channelName,
+            $capacity,
+            $serializer,
+            $tempDir,
+            $preserveObjectTypes,
+        );
     }
 
     /**
@@ -46,42 +54,59 @@ final class Channels
         string $channelName,
         string $serializer = Channel::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
-        bool $preserveObjectTypes = true
+        bool $preserveObjectTypes = true,
     ): Channel {
         if (empty($channelName)) {
             throw new Exception("Channel name cannot be empty");
         }
 
-        return Channel::connect($channelName, $serializer, $tempDir, $preserveObjectTypes);
+        return Channel::connect(
+            $channelName,
+            $serializer,
+            $tempDir,
+            $preserveObjectTypes,
+        );
     }
 
     /**
      * Check if inter-process channel exists
      */
-    public static function exists(string $channelName, ?string $tempDir = null): bool
-    {
+    public static function exists(
+        string $channelName,
+        ?string $tempDir = null,
+    ): bool {
         if (empty($channelName)) {
             return false;
         }
 
         $tempDir = $tempDir ?: sys_get_temp_dir();
-        $channelFile = $tempDir . DIRECTORY_SEPARATOR .
-            'channel_' . md5($channelName) . '.dat';
+        $channelFile =
+            $tempDir .
+            DIRECTORY_SEPARATOR .
+            "channel_" .
+            md5($channelName) .
+            ".dat";
         return file_exists($channelFile);
     }
 
     /**
      * Remove inter-process channel
      */
-    public static function remove(string $channelName, ?string $tempDir = null): bool
-    {
+    public static function remove(
+        string $channelName,
+        ?string $tempDir = null,
+    ): bool {
         if (empty($channelName)) {
             return false;
         }
 
         $tempDir = $tempDir ?: sys_get_temp_dir();
-        $channelFile = $tempDir . DIRECTORY_SEPARATOR .
-            'channel_' . md5($channelName) . '.dat';
+        $channelFile =
+            $tempDir .
+            DIRECTORY_SEPARATOR .
+            "channel_" .
+            md5($channelName) .
+            ".dat";
 
         if (file_exists($channelFile)) {
             return @unlink($channelFile);
@@ -97,7 +122,7 @@ final class Channels
         $tempDir = $tempDir ?: sys_get_temp_dir();
         $channels = [];
 
-        $pattern = $tempDir . DIRECTORY_SEPARATOR . 'channel_*.dat';
+        $pattern = $tempDir . DIRECTORY_SEPARATOR . "channel_*.dat";
         $files = glob($pattern);
 
         if ($files === false) {
@@ -114,14 +139,14 @@ final class Channels
                 $state = unserialize($content);
                 if (is_array($state)) {
                     $channels[] = [
-                        'file' => basename($file),
-                        'name' => $state['name'] ?? 'unknown',
-                        'capacity' => $state['capacity'] ?? 0,
-                        'buffer_size' => count($state['buffer'] ?? []),
-                        'closed' => $state['closed'] ?? false,
-                        'created_by' => $state['created_by'] ?? null,
-                        'last_updated' => $state['timestamp'] ?? null,
-                        'serializer' => $state['serializer'] ?? 'serialize',
+                        "file" => basename($file),
+                        "name" => $state["name"] ?? "unknown",
+                        "capacity" => $state["capacity"] ?? 0,
+                        "buffer_size" => count($state["buffer"] ?? []),
+                        "closed" => $state["closed"] ?? false,
+                        "created_by" => $state["created_by"] ?? null,
+                        "last_updated" => $state["timestamp"] ?? null,
+                        "serializer" => $state["serializer"] ?? "serialize",
                     ];
                 }
             } catch (Exception) {
@@ -148,13 +173,18 @@ final class Channels
         string $channelName,
         array $items,
         string $serializer = Channel::SERIALIZER_SERIALIZE,
-        ?string $tempDir = null
+        ?string $tempDir = null,
     ): Channel {
         if (empty($channelName)) {
             throw new Exception("Channel name cannot be empty");
         }
 
-        $channel = self::createInterProcess($channelName, count($items), $serializer, $tempDir);
+        $channel = self::createInterProcess(
+            $channelName,
+            count($items),
+            $serializer,
+            $tempDir,
+        );
         foreach ($items as $item) {
             if (!$channel->trySend($item)) {
                 throw new Exception("Failed to send item to channel");
@@ -206,7 +236,7 @@ final class Channels
         string $outputChannelName,
         string $serializer = Channel::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
-        Channel ...$channels
+        Channel ...$channels,
     ): Channel {
         if (empty($outputChannelName)) {
             throw new Exception("Output channel name cannot be empty");
@@ -216,7 +246,12 @@ final class Channels
             throw new Exception("Cannot merge empty channel list");
         }
 
-        $output = self::createInterProcess($outputChannelName, 0, $serializer, $tempDir);
+        $output = self::createInterProcess(
+            $outputChannelName,
+            0,
+            $serializer,
+            $tempDir,
+        );
 
         foreach ($channels as $channel) {
             Launch::new(function () use ($channel, $output) {
@@ -269,13 +304,18 @@ final class Channels
         callable $transform,
         string $outputChannelName,
         string $serializer = Channel::SERIALIZER_SERIALIZE,
-        ?string $tempDir = null
+        ?string $tempDir = null,
     ): Channel {
         if (empty($outputChannelName)) {
             throw new Exception("Output channel name cannot be empty");
         }
 
-        $output = self::createInterProcess($outputChannelName, 0, $serializer, $tempDir);
+        $output = self::createInterProcess(
+            $outputChannelName,
+            0,
+            $serializer,
+            $tempDir,
+        );
 
         Launch::new(function () use ($input, $output, $transform) {
             try {
@@ -330,13 +370,18 @@ final class Channels
         callable $predicate,
         string $outputChannelName,
         string $serializer = Channel::SERIALIZER_SERIALIZE,
-        ?string $tempDir = null
+        ?string $tempDir = null,
     ): Channel {
         if (empty($outputChannelName)) {
             throw new Exception("Output channel name cannot be empty");
         }
 
-        $output = self::createInterProcess($outputChannelName, 0, $serializer, $tempDir);
+        $output = self::createInterProcess(
+            $outputChannelName,
+            0,
+            $serializer,
+            $tempDir,
+        );
 
         Launch::new(function () use ($input, $output, $predicate) {
             try {
@@ -403,7 +448,7 @@ final class Channels
         int $count,
         string $outputChannelName,
         string $serializer = Channel::SERIALIZER_SERIALIZE,
-        ?string $tempDir = null
+        ?string $tempDir = null,
     ): Channel {
         if ($count < 0) {
             throw new Exception("Count cannot be negative");
@@ -413,7 +458,12 @@ final class Channels
             throw new Exception("Output channel name cannot be empty");
         }
 
-        $output = self::createInterProcess($outputChannelName, 0, $serializer, $tempDir);
+        $output = self::createInterProcess(
+            $outputChannelName,
+            0,
+            $serializer,
+            $tempDir,
+        );
 
         if ($count === 0) {
             $output->close();
@@ -423,7 +473,10 @@ final class Channels
         Launch::new(function () use ($input, $output, $count) {
             try {
                 $taken = 0;
-                while ($taken < $count && (!$input->isClosed() || !$input->isEmpty())) {
+                while (
+                    $taken < $count &&
+                    (!$input->isClosed() || !$input->isEmpty())
+                ) {
                     $value = $input->tryReceive();
                     if ($value !== null) {
                         if (!$output->trySend($value)) {
@@ -450,9 +503,13 @@ final class Channels
      */
     public static function getPlatformInfo(): array
     {
-        $testChannel = new Channel(0, true, 'test_info_' . uniqid());
+        $testChannel = new Channel(0, true, "test_info_" . uniqid());
         $info = $testChannel->getInfo();
-        $testChannel->cleanup(); // Clean up test channel
+        // No manual cleanup() call here — __destruct() handles it.
+        // Calling cleanup() manually caused double shm_detach() because
+        // the destructor (and the shutdown function registered by
+        // initInterProcessSupport) would call cleanup() again on the
+        // already-destroyed shared memory block, triggering a fatal error.
         return $info;
     }
 
@@ -466,18 +523,26 @@ final class Channels
         }
 
         if ($step > 0 && $start > $end) {
-            throw new Exception("Start cannot be greater than end with positive step");
+            throw new Exception(
+                "Start cannot be greater than end with positive step",
+            );
         }
 
         if ($step < 0 && $start < $end) {
-            throw new Exception("Start cannot be less than end with negative step");
+            throw new Exception(
+                "Start cannot be less than end with negative step",
+            );
         }
 
         $channel = new Channel();
 
         Launch::new(function () use ($channel, $start, $end, $step) {
             try {
-                for ($i = $start; $step > 0 ? $i <= $end : $i >= $end; $i += $step) {
+                for (
+                    $i = $start;
+                    $step > 0 ? $i <= $end : $i >= $end;
+                    $i += $step
+                ) {
                     $channel->send($i);
                 }
             } catch (Exception) {

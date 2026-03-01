@@ -1074,12 +1074,18 @@ final class Channel implements IteratorAggregate
     {
         if ($this->interProcess) {
             if ($this->sharedMemory) {
-                @shm_detach($this->sharedMemory);
+                try {
+                    @shm_detach($this->sharedMemory);
+                } catch (\Error) {
+                    // Already destroyed/detached — ignore
+                }
+                $this->sharedMemory = null;
             }
 
             if ($this->channelFile && file_exists($this->channelFile)) {
                 @unlink($this->channelFile);
             }
+            $this->channelFile = null;
         }
     }
 

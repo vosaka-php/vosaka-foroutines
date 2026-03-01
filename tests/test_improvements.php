@@ -662,80 +662,80 @@ main(function () {
         );
     }
 
-    // if (ForkProcess::isForkAvailable()) {
-    //     test(
-    //         "ForkProcess falls back to Process on unsupported platforms",
-    //         function () {
-    //             // On fork-available platforms, we test actual fork execution.
-    //             RunBlocking::new(function () {
-    //                 $result = null;
+    if (ForkProcess::isForkAvailable()) {
+        test(
+            "ForkProcess falls back to Process on unsupported platforms",
+            function () {
+                // On fork-available platforms, we test actual fork execution.
+                RunBlocking::new(function () {
+                    $result = null;
 
-    //                 Launch::new(function () use (&$result) {
-    //                     $fork = new ForkProcess();
-    //                     $async = $fork->run(function () {
-    //                         return "fallback-works";
-    //                     });
-    //                     $result = $async->wait();
-    //                 });
+                    Launch::new(function () use (&$result) {
+                        $fork = new ForkProcess();
+                        $async = $fork->run(function () {
+                            return "fallback-works";
+                        });
+                        $result = $async->wait();
+                    });
 
-    //                 Thread::wait();
+                    Thread::wait();
 
-    //                 assert_eq(
-    //                     "fallback-works",
-    //                     $result,
-    //                     " — fork should produce correct result",
-    //                 );
-    //             });
-    //         },
-    //     );
-    // } else {
-    //     test(
-    //         "ForkProcess falls back to Process on unsupported platforms",
-    //         function () {
-    //             // On Windows / no-pcntl: just verify the class instantiates and
-    //             // isForkAvailable returns false. We skip the actual IO dispatch
-    //             // because spawning a child PHP process inside test_improvements.php
-    //             // causes the child to re-run main() (the SCRIPT_FILENAME matches),
-    //             // producing duplicate output and potentially hanging.
-    //             $fork = new ForkProcess();
-    //             assert_false(
-    //                 ForkProcess::isForkAvailable(),
-    //                 " — fork should not be available on this platform",
-    //             );
-    //             // The fallback path (symfony/process) is already tested by
-    //             // the existing test_io.php and test_dispatchers.php test files.
-    //             echo " (fallback path verified structurally)";
-    //         },
-    //     );
-    // }
+                    assert_eq(
+                        "fallback-works",
+                        $result,
+                        " — fork should produce correct result",
+                    );
+                });
+            },
+        );
+    } else {
+        test(
+            "ForkProcess falls back to Process on unsupported platforms",
+            function () {
+                // On Windows / no-pcntl: just verify the class instantiates and
+                // isForkAvailable returns false. We skip the actual IO dispatch
+                // because spawning a child PHP process inside test_improvements.php
+                // causes the child to re-run main() (the SCRIPT_FILENAME matches),
+                // producing duplicate output and potentially hanging.
+                $fork = new ForkProcess();
+                assert_false(
+                    ForkProcess::isForkAvailable(),
+                    " — fork should not be available on this platform",
+                );
+                // The fallback path (symfony/process) is already tested by
+                // the existing test_io.php and test_dispatchers.php test files.
+                echo " (fallback path verified structurally)";
+            },
+        );
+    }
 
-    // if (ForkProcess::isForkAvailable()) {
-    //     test("Worker uses ForkProcess when available", function () {
-    //         // Worker should transparently use ForkProcess
-    //         RunBlocking::new(function () {
-    //             $result = null;
+    if (ForkProcess::isForkAvailable()) {
+        test("Worker uses ForkProcess when available", function () {
+            // Worker should transparently use ForkProcess
+            RunBlocking::new(function () {
+                $result = null;
 
-    //             Launch::new(function () use (&$result) {
-    //                 $result = Async::new(function () {
-    //                     return "via-worker";
-    //                 }, Dispatchers::IO)->wait();
-    //             });
+                Launch::new(function () use (&$result) {
+                    $result = Async::new(function () {
+                        return "via-worker";
+                    }, Dispatchers::IO)->wait();
+                });
 
-    //             Thread::wait();
+                Thread::wait();
 
-    //             assert_eq(
-    //                 "via-worker",
-    //                 $result,
-    //                 " — IO dispatch should work via Worker",
-    //             );
-    //         });
-    //     });
-    // } else {
-    //     skip(
-    //         "Worker uses ForkProcess when available",
-    //         "pcntl not available — IO dispatch via child process skipped to avoid test-in-test recursion",
-    //     );
-    // }
+                assert_eq(
+                    "via-worker",
+                    $result,
+                    " — IO dispatch should work via Worker",
+                );
+            });
+        });
+    } else {
+        skip(
+            "Worker uses ForkProcess when available",
+            "pcntl not available — IO dispatch via child process skipped to avoid test-in-test recursion",
+        );
+    }
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
