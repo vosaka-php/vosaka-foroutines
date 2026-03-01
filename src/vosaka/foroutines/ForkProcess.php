@@ -7,6 +7,7 @@ namespace vosaka\foroutines;
 use Closure;
 use Exception;
 use Fiber;
+use Generator;
 use Laravel\SerializableClosure\SerializableClosure;
 
 /**
@@ -234,6 +235,27 @@ final class ForkProcess
         try {
             // Execute the user's closure
             $result = $closure();
+
+            // If the closure returned a Generator, exhaust it to get
+            // the final value. Generators cannot be serialized, so we
+            // must consume them here in the child process.
+            if ($result instanceof Generator) {
+                $genResult = null;
+                while ($result->valid()) {
+                    $genResult = $result->current();
+                    $result->next();
+                }
+                // If the generator used "return <value>", prefer that.
+                try {
+                    $returnValue = $result->getReturn();
+                    if ($returnValue !== null) {
+                        $genResult = $returnValue;
+                    }
+                } catch (\Exception) {
+                    // Generator didn't return a value; use last yielded value
+                }
+                $result = $genResult;
+            }
 
             // Serialize the result
             $serialized = serialize($result);
