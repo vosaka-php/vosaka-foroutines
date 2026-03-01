@@ -20,6 +20,9 @@
  *  10.  Simulated database queries — N queries with varying latency
  *  11.  Mixed I/O sizes — small + medium + large file operations
  *  12.  Throughput scaling — varying concurrent I/O task count
+ *  13.  AsyncIO file writes — AsyncIO::filePutContents()->await()
+ *  14.  AsyncIO file reads  — AsyncIO::fileGetContents()->await()
+ *  15.  AsyncIO pipeline    — write → read → socket pair via ->await()
  *
  * Why this matters:
  *   I/O-bound workloads are where async truly shines. While one task waits
@@ -27,11 +30,12 @@
  *   non-blocking by default (libuv handles it). In PHP, standard I/O is
  *   blocking, so VOsaka must either:
  *     a) Use Delay::new() to cooperatively yield during simulated waits
- *     b) Use AsyncIO for real stream-based non-blocking I/O
+ *     b) Use AsyncIO::method()->await() for real stream-based non-blocking I/O
  *     c) Use Dispatchers::IO to offload blocking calls to child processes
  *
- *   This benchmark focuses on (a) and (c) since file I/O in PHP is inherently
- *   blocking and cannot use stream_select() effectively for local files.
+ *   This benchmark covers (a), (b), and (c). AsyncIO file operations use
+ *   cooperative yielding between chunks via the deferred ->await() pattern,
+ *   and AsyncIO also provides createSocketPair() for in-process IPC.
  *
  * Expected results:
  *   - Simulated latency tests: async ~Nx faster (delays overlap)
@@ -48,6 +52,7 @@ require __DIR__ . "/BenchHelper.php";
 
 use comp\BenchHelper;
 use vosaka\foroutines\Async;
+use vosaka\foroutines\AsyncIO;
 use vosaka\foroutines\Delay;
 use vosaka\foroutines\Dispatchers;
 use vosaka\foroutines\Launch;
@@ -992,6 +997,274 @@ main(function () {
     );
 
     // ═════════════════════════════════════════════════════════════════
+    // Test 13: AsyncIO file writes — AsyncIO::filePutContents()->await()
+    //
+    // Uses the new deferred AsyncIO->await() pattern for non-blocking
+    // file writes within fibers. Compared against blocking sequential
+    // file_put_contents and Launch + file_put_contents.
+    // ═════════════════════════════════════════════════════════════════
+    BenchHelper::subHeader(
+        "Test 13: AsyncIO file writes — 10 × 1KB via ->await()",
+    );
+
+    $fileCount = 10;
+    $fileSize = 1024;
+    $content = generateContent($fileSize);
+    $prefix = "asyncio13";
+
+    cleanupBenchFiles($prefix . "_b", $fileCount);
+    cleanupBenchFiles($prefix . "_a", $fileCount);
+
+    // --- Blocking ---
+    [, $blockingMs] = BenchHelper::measure(function () use (
+        $fileCount,
+        $content,
+        $prefix,
+    ) {
+        for ($i = 0; $i < $fileCount; $i++) {
+            file_put_contents(benchTempPath($prefix . "_b", $i), $content);
+        }
+    });
+    BenchHelper::timing("Blocking (sequential writes):", $blockingMs);
+    cleanupBenchFiles($prefix . "_b", $fileCount);
+
+    // --- AsyncIO::filePutContents()->await() ---
+    [, $asyncIoMs] = BenchHelper::measure(function () use (
+        $fileCount,
+        $content,
+        $prefix,
+    ) {
+        RunBlocking::new(function () use ($fileCount, $content, $prefix) {
+            for ($i = 0; $i < $fileCount; $i++) {
+                Launch::new(function () use ($i, $content, $prefix) {
+                    AsyncIO::filePutContents(
+                        benchTempPath($prefix . "_a", $i),
+                        $content,
+                    )->await();
+                });
+            }
+            Thread::await();
+        });
+        Thread::await();
+    });
+    BenchHelper::timing("AsyncIO (->await() writes):", $asyncIoMs);
+    cleanupBenchFiles($prefix . "_a", $fileCount);
+
+    BenchHelper::comparison("10×1KB AsyncIO writes", $blockingMs, $asyncIoMs);
+    BenchHelper::info(
+        "    AsyncIO::filePutContents()->await() yields between chunks",
+    );
+    BenchHelper::info(
+        "    Pattern: AsyncIO::method()->await() — explicit deferred I/O",
+    );
+    BenchHelper::record(
+        "AsyncIO 10×1KB writes",
+        $blockingMs,
+        $asyncIoMs,
+        "->await() file writes",
+    );
+
+    // ═════════════════════════════════════════════════════════════════
+    // Test 14: AsyncIO file reads — AsyncIO::fileGetContents()->await()
+    //
+    // Non-blocking file reads via the deferred ->await() pattern.
+    // Concurrent reads cooperatively yield between chunks.
+    // ═════════════════════════════════════════════════════════════════
+    BenchHelper::subHeader(
+        "Test 14: AsyncIO file reads — 10 × 1KB via ->await()",
+    );
+
+    $prefix = "asyncio14";
+    // Setup: create files to read
+    for ($i = 0; $i < $fileCount; $i++) {
+        file_put_contents(benchTempPath($prefix, $i), $content);
+    }
+
+    // --- Blocking ---
+    [$blockingCount, $blockingMs] = BenchHelper::measure(function () use (
+        $fileCount,
+        $prefix,
+    ) {
+        $data = [];
+        for ($i = 0; $i < $fileCount; $i++) {
+            $data[] = file_get_contents(benchTempPath($prefix, $i));
+        }
+        return count($data);
+    });
+    BenchHelper::timing("Blocking (sequential reads):", $blockingMs);
+
+    // --- AsyncIO::fileGetContents()->await() ---
+    [$asyncIoCount, $asyncIoMs] = BenchHelper::measure(function () use (
+        $fileCount,
+        $prefix,
+    ) {
+        $data = [];
+        RunBlocking::new(function () use ($fileCount, $prefix, &$data) {
+            for ($i = 0; $i < $fileCount; $i++) {
+                Launch::new(function () use ($i, $prefix, &$data) {
+                    $data[$i] = AsyncIO::fileGetContents(
+                        benchTempPath($prefix, $i),
+                    )->await();
+                });
+            }
+            Thread::await();
+        });
+        Thread::await();
+        return count($data);
+    });
+    BenchHelper::timing("AsyncIO (->await() reads):", $asyncIoMs);
+
+    BenchHelper::comparison("10×1KB AsyncIO reads", $blockingMs, $asyncIoMs);
+    BenchHelper::assert(
+        "All files read (blocking)",
+        $blockingCount === $fileCount,
+    );
+    BenchHelper::assert(
+        "All files read (AsyncIO)",
+        $asyncIoCount === $fileCount,
+    );
+    BenchHelper::record(
+        "AsyncIO 10×1KB reads",
+        $blockingMs,
+        $asyncIoMs,
+        "->await() file reads",
+    );
+
+    cleanupBenchFiles($prefix, $fileCount);
+
+    // ═════════════════════════════════════════════════════════════════
+    // Test 15: AsyncIO write-then-read pipeline + socket pair IPC
+    //
+    // Demonstrates chaining: write a file via AsyncIO, read it back,
+    // then send the content through an AsyncIO socket pair.
+    //
+    // 3 tasks, each: write file → read file → send via socket pair
+    // Compared against blocking sequential equivalent.
+    //
+    // NOTE: On Windows, createSocketPair() uses loopback TCP which adds
+    // significant overhead per pair. On Linux/macOS, Unix socket pairs
+    // are near-instant.
+    // ═════════════════════════════════════════════════════════════════
+
+    $pipelineCount = 3;
+    $prefix = "asyncio15";
+    $pipelineContent = generateContent(512);
+    $isWindows = strtoupper(substr(PHP_OS, 0, 3)) === "WIN";
+
+    BenchHelper::subHeader(
+        "Test 15: AsyncIO pipeline — write → read → socket pair × {$pipelineCount}",
+    );
+
+    cleanupBenchFiles($prefix, $pipelineCount);
+
+    // --- Blocking (sequential write → read → loopback copy) ---
+    [, $blockingMs] = BenchHelper::measure(function () use (
+        $pipelineCount,
+        $pipelineContent,
+        $prefix,
+    ) {
+        for ($i = 0; $i < $pipelineCount; $i++) {
+            $path = benchTempPath($prefix, $i);
+            file_put_contents($path, $pipelineContent);
+            $readBack = file_get_contents($path);
+            // Simulate IPC: write to a temp stream and read back
+            $tmp = fopen("php://memory", "r+b");
+            fwrite($tmp, $readBack);
+            rewind($tmp);
+            $ipcData = stream_get_contents($tmp);
+            fclose($tmp);
+        }
+    });
+    BenchHelper::timing("Blocking (sequential pipeline):", $blockingMs);
+    cleanupBenchFiles($prefix, $pipelineCount);
+
+    // --- AsyncIO pipeline with ->await() ---
+    [$asyncIoResults, $asyncIoMs] = BenchHelper::measure(function () use (
+        $pipelineCount,
+        $pipelineContent,
+        $prefix,
+    ) {
+        $results = [];
+        RunBlocking::new(function () use (
+            $pipelineCount,
+            $pipelineContent,
+            $prefix,
+            &$results,
+        ) {
+            for ($i = 0; $i < $pipelineCount; $i++) {
+                Launch::new(function () use (
+                    $i,
+                    $pipelineContent,
+                    $prefix,
+                    &$results,
+                ) {
+                    $path = benchTempPath($prefix, $i);
+
+                    // Step 1: Write via AsyncIO
+                    AsyncIO::filePutContents($path, $pipelineContent)->await();
+
+                    // Step 2: Read back via AsyncIO
+                    $readBack = AsyncIO::fileGetContents($path)->await();
+
+                    // Step 3: Send through socket pair via AsyncIO
+                    $pair = AsyncIO::createSocketPair()->await();
+                    fwrite($pair[0], $readBack);
+                    $ipcData = fread($pair[1], strlen($readBack) + 1);
+                    fclose($pair[0]);
+                    fclose($pair[1]);
+
+                    $results[$i] = strlen($ipcData);
+                });
+            }
+            Thread::await();
+        });
+        Thread::await();
+        return $results;
+    });
+    BenchHelper::timing("AsyncIO (->await() pipeline):", $asyncIoMs);
+    cleanupBenchFiles($prefix, $pipelineCount);
+
+    BenchHelper::comparison(
+        "{$pipelineCount}× write→read→IPC pipeline",
+        $blockingMs,
+        $asyncIoMs,
+    );
+    BenchHelper::assert(
+        "All pipeline results collected",
+        count($asyncIoResults) === $pipelineCount,
+    );
+    if (count($asyncIoResults) === $pipelineCount) {
+        $allCorrectSize = true;
+        foreach ($asyncIoResults as $size) {
+            if ($size !== strlen($pipelineContent)) {
+                $allCorrectSize = false;
+                break;
+            }
+        }
+        BenchHelper::assert("All IPC data sizes correct", $allCorrectSize);
+    }
+    BenchHelper::info(
+        "    Pattern: AsyncIO::filePutContents()->await() → fileGetContents()->await() → createSocketPair()->await()",
+    );
+    if ($isWindows) {
+        BenchHelper::info(
+            "    NOTE: On Windows, createSocketPair() uses loopback TCP (no Unix sockets)",
+        );
+        BenchHelper::info(
+            "    Each pair = stream_socket_server + stream_socket_client + accept → high overhead",
+        );
+        BenchHelper::info(
+            "    On Linux/macOS, stream_socket_pair(STREAM_PF_UNIX) is near-instant",
+        );
+    }
+    BenchHelper::record(
+        "AsyncIO pipeline ×{$pipelineCount}",
+        $blockingMs,
+        $asyncIoMs,
+        "write→read→socketPair" . ($isWindows ? " (Win loopback)" : ""),
+    );
+
+    // ═════════════════════════════════════════════════════════════════
     //  Summary
     // ═════════════════════════════════════════════════════════════════
     BenchHelper::printSummary();
@@ -1037,6 +1310,9 @@ main(function () {
         "  • VOsaka file I/O in DEFAULT: still blocking (PHP limitation)",
     );
     BenchHelper::info(
+        "  • VOsaka AsyncIO file I/O: cooperative yielding between chunks",
+    );
+    BenchHelper::info(
         "  • VOsaka file I/O in IO: child process → overhead but true parallel",
     );
     BenchHelper::info(
@@ -1049,7 +1325,7 @@ main(function () {
         "  • Key: VOsaka shines when tasks have WAIT TIME (network, API calls)",
     );
     BenchHelper::info(
-        "         but struggles with raw disk I/O due to PHP blocking functions",
+        "         AsyncIO::method()->await() makes async I/O explicit and composable",
     );
     BenchHelper::info("");
 });

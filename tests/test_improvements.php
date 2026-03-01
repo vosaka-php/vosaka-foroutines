@@ -13,6 +13,7 @@ use vosaka\foroutines\{
     Dispatchers,
     WorkerPool,
     AsyncIO,
+    AsyncIOOperation,
     ForkProcess,
     Pause,
     TimeUtils,
@@ -514,6 +515,240 @@ main(function () {
             assert_eq(2, count($results), " — both tasks should complete");
         });
     });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// IMPROVEMENT 2b: AsyncIOOperation — Deferred ->await() pattern
+// ═════════════════════════════════════════════════════════════════════════════
+
+echo "\n\n--- IMPROVEMENT 2b: AsyncIOOperation (deferred ->await() pattern) ---";
+
+main(function () {
+    test(
+        "AsyncIO methods return AsyncIOOperation, not direct results",
+        function () {
+            $op = AsyncIO::fileGetContents(__DIR__ . "/test.txt");
+            assert_true(
+                $op instanceof AsyncIOOperation,
+                " — fileGetContents() should return AsyncIOOperation, got " .
+                    get_class($op),
+            );
+
+            $op2 = AsyncIO::filePutContents(
+                sys_get_temp_dir() . "/asyncio_op_test_" . time() . ".txt",
+                "test",
+            );
+            assert_true(
+                $op2 instanceof AsyncIOOperation,
+                " — filePutContents() should return AsyncIOOperation",
+            );
+
+            $op3 = AsyncIO::dnsResolve("127.0.0.1");
+            assert_true(
+                $op3 instanceof AsyncIOOperation,
+                " — dnsResolve() should return AsyncIOOperation",
+            );
+
+            $op4 = AsyncIO::createSocketPair();
+            assert_true(
+                $op4 instanceof AsyncIOOperation,
+                " — createSocketPair() should return AsyncIOOperation",
+            );
+
+            $op5 = AsyncIO::httpGet("http://example.com");
+            assert_true(
+                $op5 instanceof AsyncIOOperation,
+                " — httpGet() should return AsyncIOOperation",
+            );
+
+            $op6 = AsyncIO::httpPost("http://example.com", "{}");
+            assert_true(
+                $op6 instanceof AsyncIOOperation,
+                " — httpPost() should return AsyncIOOperation",
+            );
+        },
+    );
+
+    test(
+        "AsyncIOOperation is lazy — does not execute until await()",
+        function () {
+            // Create an operation targeting a nonexistent file.
+            // If it were eager, it would throw immediately.
+            $op = AsyncIO::fileGetContents(
+                "/nonexistent/lazy_test_" . mt_rand() . ".txt",
+            );
+
+            // No exception yet — the operation is deferred
+            assert_true(
+                $op instanceof AsyncIOOperation,
+                " — should return AsyncIOOperation without throwing",
+            );
+
+            // Now await() should trigger the actual execution and throw
+            $thrown = false;
+            RunBlocking::new(function () use ($op, &$thrown) {
+                Launch::new(function () use ($op, &$thrown) {
+                    try {
+                        $op->await();
+                    } catch (\RuntimeException $e) {
+                        $thrown = true;
+                    }
+                });
+
+                Thread::await();
+            });
+
+            assert_true(
+                $thrown,
+                " — await() should trigger execution and throw on missing file",
+            );
+        },
+    );
+
+    test("AsyncIOOperation->await() works inside Fiber context", function () {
+        RunBlocking::new(function () {
+            $content = null;
+            $testFile = __DIR__ . "/test.txt";
+
+            if (!file_exists($testFile)) {
+                file_put_contents($testFile, "hello async world");
+            }
+
+            Launch::new(function () use (&$content, $testFile) {
+                // Inside a Fiber — await() executes directly in current Fiber
+                $op = AsyncIO::fileGetContents($testFile);
+                $content = $op->await();
+            });
+
+            Thread::await();
+
+            assert_true(
+                $content !== null,
+                " — await() inside Fiber should return data",
+            );
+            assert_true(
+                strlen((string) $content) > 0,
+                " — content should not be empty",
+            );
+        });
+    });
+
+    test(
+        "AsyncIOOperation->await() works outside Fiber context (top-level)",
+        function () {
+            // Outside any Fiber — await() wraps in Async::new() internally
+            $ip = AsyncIO::dnsResolve("127.0.0.1")->await();
+
+            assert_eq(
+                "127.0.0.1",
+                $ip,
+                " — await() outside Fiber should resolve correctly",
+            );
+        },
+    );
+
+    test(
+        "Multiple AsyncIOOperation->await() calls in sequence inside Fiber",
+        function () {
+            RunBlocking::new(function () {
+                $file1 =
+                    sys_get_temp_dir() . "/asyncio_seq1_" . time() . ".txt";
+                $file2 =
+                    sys_get_temp_dir() . "/asyncio_seq2_" . time() . ".txt";
+                file_put_contents($file1, "content-one");
+                file_put_contents($file2, "content-two");
+
+                $r1 = null;
+                $r2 = null;
+
+                Launch::new(function () use (&$r1, &$r2, $file1, $file2) {
+                    $r1 = AsyncIO::fileGetContents($file1)->await();
+                    $r2 = AsyncIO::fileGetContents($file2)->await();
+                });
+
+                Thread::await();
+
+                assert_eq(
+                    "content-one",
+                    $r1,
+                    " — first sequential read should match",
+                );
+                assert_eq(
+                    "content-two",
+                    $r2,
+                    " — second sequential read should match",
+                );
+
+                @unlink($file1);
+                @unlink($file2);
+            });
+        },
+    );
+
+    test(
+        "AsyncIOOperation->await() chaining with write then read",
+        function () {
+            RunBlocking::new(function () {
+                $testFile =
+                    sys_get_temp_dir() . "/asyncio_chain_" . time() . ".txt";
+                $data = "chained-write-read-" . microtime(true);
+
+                $result = null;
+
+                Launch::new(function () use (&$result, $testFile, $data) {
+                    AsyncIO::filePutContents($testFile, $data)->await();
+                    $result = AsyncIO::fileGetContents($testFile)->await();
+                });
+
+                Thread::await();
+
+                assert_eq(
+                    $data,
+                    $result,
+                    " — read after write should return same data",
+                );
+
+                @unlink($testFile);
+            });
+        },
+    );
+
+    test(
+        "AsyncIOOperation->await() with createSocketPair and stream ops",
+        function () {
+            RunBlocking::new(function () {
+                $received = null;
+
+                Launch::new(function () use (&$received) {
+                    $pair = AsyncIO::createSocketPair()->await();
+
+                    assert_true(
+                        is_resource($pair[0]),
+                        " — first socket should be a resource",
+                    );
+                    assert_true(
+                        is_resource($pair[1]),
+                        " — second socket should be a resource",
+                    );
+
+                    // Write through one end, read from the other
+                    fwrite($pair[0], "deferred-hello");
+                    $received = fread($pair[1], 1024);
+
+                    fclose($pair[0]);
+                    fclose($pair[1]);
+                });
+
+                Thread::await();
+
+                assert_eq(
+                    "deferred-hello",
+                    $received,
+                    " — data should pass through socket pair via deferred await",
+                );
+            });
+        },
+    );
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -64,7 +64,8 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 - `Mutex` for multi-process synchronization (file, semaphore, APCu)
 
 ### I/O & Concurrency
-- **`AsyncIO`** — Non-blocking stream I/O via `stream_select()` (TCP, TLS, files, HTTP, DNS)
+- **`AsyncIO`** — Non-blocking stream I/O via `stream_select()` (TCP, TLS, files, HTTP, DNS) with explicit `->await()` pattern
+- **`AsyncIOOperation`** — Lazy deferred wrapper returned by all `AsyncIO` I/O methods; executes on `->await()`
 - **`ForkProcess`** — Low-overhead child process via `pcntl_fork()` on Linux/macOS, with automatic fallback to `symfony/process` on Windows
 - `WorkerPool` for parallel execution with configurable pool size
 
@@ -313,6 +314,37 @@ The following features were added to improve real-world async performance, reduc
 
 Under the hood it uses `stream_select()` to multiplex across all registered read/write watchers. When a stream becomes ready, the corresponding fiber is resumed automatically by the scheduler.
 
+All public I/O methods return an `AsyncIOOperation` instance — a lightweight lazy wrapper. The actual work is **deferred** until you call `->await()`, making every async call explicit and consistent:
+
+```php
+$body   = AsyncIO::httpGet('https://example.com')->await();
+$data   = AsyncIO::fileGetContents('/path/to/file')->await();
+$socket = AsyncIO::tcpConnect('example.com', 80)->await();
+```
+
+#### AsyncIOOperation — Deferred Await Pattern
+
+`AsyncIOOperation` is a thin wrapper returned by every `AsyncIO` I/O method. It holds the operation callable but does **not** execute it until `->await()` is called:
+
+```php
+// This does NOT execute yet — it only creates the deferred operation
+$op = AsyncIO::fileGetContents('/path/to/file');
+
+// The actual I/O happens here
+$content = $op->await();
+```
+
+**How `->await()` works in different contexts:**
+
+| Context | Behavior |
+|---|---|
+| Inside a Fiber (`Launch::new`, `Async::new`) | Executes directly in the current Fiber — `waitForRead`/`waitForWrite` suspensions integrate with the scheduler's `pollOnce()` |
+| Outside a Fiber (top-level code) | Wraps in `Async::new()` internally, creating a dedicated Fiber with a full scheduler loop |
+
+This design ensures you always see `->await()` at the call site, making it immediately clear that the code is performing an async operation — similar to `await` in JavaScript/Kotlin.
+
+#### AsyncIO Usage
+
 ```php
 use vosaka\foroutines\{RunBlocking, Launch, Thread, AsyncIO};
 use function vosaka\foroutines\main;
@@ -321,23 +353,30 @@ main(function () {
     RunBlocking::new(function () {
         // Non-blocking TCP connection
         Launch::new(function () {
-            $socket = AsyncIO::tcpConnect('example.com', 80, timeoutMs: 5000);
-            AsyncIO::streamWrite($socket, "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n");
-            $response = AsyncIO::streamReadAll($socket);
+            $socket = AsyncIO::tcpConnect('example.com', 80)->await();
+            AsyncIO::streamWrite($socket, "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n")->await();
+            $response = AsyncIO::streamReadAll($socket)->await();
             fclose($socket);
             var_dump(strlen($response) . ' bytes received');
         });
 
         // Non-blocking file read (runs concurrently with TCP above)
         Launch::new(function () {
-            $content = AsyncIO::fileGetContents('/path/to/file.txt');
+            $content = AsyncIO::fileGetContents('/path/to/file.txt')->await();
             var_dump('File: ' . strlen($content) . ' bytes');
         });
 
         // Non-blocking DNS resolution
         Launch::new(function () {
-            $ip = AsyncIO::dnsResolve('example.com');
+            $ip = AsyncIO::dnsResolve('example.com')->await();
             var_dump("Resolved: $ip");
+        });
+
+        // Write then read back
+        Launch::new(function () {
+            AsyncIO::filePutContents('/tmp/output.txt', 'hello world')->await();
+            $data = AsyncIO::fileGetContents('/tmp/output.txt')->await();
+            var_dump($data); // "hello world"
         });
 
         Thread::await();
@@ -347,22 +386,31 @@ main(function () {
 
 #### AsyncIO API Reference
 
+All I/O methods return `AsyncIOOperation`. Call `->await()` to execute and get the result.
+
+| Method | Returns (via `->await()`) | Description |
+|---|---|---|
+| `tcpConnect(host, port, timeout)->await()` | `resource` | Non-blocking TCP connection |
+| `tlsConnect(host, port, timeout)->await()` | `resource` | Non-blocking TLS/SSL connection |
+| `streamRead(stream, maxBytes, timeout)->await()` | `string` | Read up to N bytes, suspends until data ready |
+| `streamReadAll(stream, timeout)->await()` | `string` | Read until EOF, suspends between chunks |
+| `streamWrite(stream, data, timeout)->await()` | `int` | Write data, suspends until stream writable |
+| `httpGet(url, headers, timeout)->await()` | `string` | Full HTTP GET via non-blocking sockets |
+| `httpPost(url, body, headers, contentType, timeout)->await()` | `string` | Full HTTP POST via non-blocking sockets |
+| `fileGetContents(path)->await()` | `string` | Read entire file non-blockingly |
+| `filePutContents(path, data, flags)->await()` | `int` | Write file non-blockingly |
+| `dnsResolve(hostname)->await()` | `string` | Resolve hostname to IP |
+| `createSocketPair()->await()` | `array{resource, resource}` | Create a connected socket pair (IPC) |
+
+**Scheduler methods** (called automatically, no `->await()` needed):
+
 | Method | Description |
 |---|---|
-| `tcpConnect(host, port, timeoutMs)` | Non-blocking TCP connection, returns stream resource |
-| `tlsConnect(host, port, timeoutMs)` | Non-blocking TLS/SSL connection |
-| `streamRead(stream, length)` | Read up to N bytes, suspends fiber until data ready |
-| `streamReadAll(stream, chunkSize)` | Read until EOF, suspends between chunks |
-| `streamWrite(stream, data)` | Write data, suspends fiber until stream writable |
-| `httpGet(url, headers, timeoutMs)` | Full HTTP GET via non-blocking sockets |
-| `httpPost(url, body, headers, timeoutMs)` | Full HTTP POST via non-blocking sockets |
-| `fileGetContents(path)` | Read entire file non-blockingly |
-| `filePutContents(path, data, flags)` | Write file non-blockingly |
-| `dnsResolve(hostname)` | Resolve hostname to IP |
-| `createSocketPair()` | Create a connected socket pair (IPC) |
-| `pollOnce(timeoutUs)` | Single event-loop tick (called automatically by scheduler) |
+| `pollOnce()` | Single event-loop tick via `stream_select()` |
 | `hasPending()` | Check if any watchers are registered |
+| `pendingCount()` | Number of pending watchers |
 | `cancelAll()` | Cancel all pending watchers |
+| `resetState()` | Clear all watchers (used after fork) |
 
 ### ForkProcess — Low-overhead Child Processes
 
@@ -560,14 +608,15 @@ When all three report no work, the scheduler sleeps briefly — similar to how N
 | Aspect | JS (Node.js) | VOsaka Foroutines |
 |---|---|---|
 | Runtime | libuv event loop (C) | PHP Fibers + stream_select |
-| I/O model | All I/O is non-blocking by default | AsyncIO for streams; `Dispatchers::IO` for blocking APIs |
+| I/O model | All I/O is non-blocking by default | `AsyncIO` for streams; `Dispatchers::IO` for blocking APIs |
 | Concurrency | Single-threaded + worker threads | Single process + child processes (fork/spawn) |
 | Scheduler efficiency | epoll/kqueue (OS-level) | stream_select + usleep idle detection |
-| Syntax | async/await (language-level) | Fiber-based cooperative (library-level) |
+| Syntax | `async/await` (language-level) | `AsyncIO::method()->await()` / `Async::new()->await()` (library-level) |
+| Deferred execution | Promises are eager | `AsyncIOOperation` is lazy (deferred until `->await()`) |
 | Flow control | Streams (backpressure built-in) | BackpressureStrategy (SUSPEND/DROP/ERROR) |
 
 **Key insight**: PHP's standard library I/O functions are blocking. VOsaka Foroutines works around this by:
-1. Using `stream_select()` for non-blocking socket/stream I/O in `Dispatchers::DEFAULT`
+1. Using `stream_select()` for non-blocking socket/stream I/O in `Dispatchers::DEFAULT` via `AsyncIO::method()->await()`
 2. Offloading blocking I/O to child processes via `Dispatchers::IO` (with `pcntl_fork()` or `symfony/process`)
 3. Cooperative multitasking between fibers via `Pause::new()` / `Fiber::suspend()`
 
