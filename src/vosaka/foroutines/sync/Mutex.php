@@ -515,8 +515,13 @@ class Mutex
             $this->actualLockType === self::LOCK_SEMAPHORE
         ) {
             // Note: sem_remove() removes the semaphore completely
-            // Use with caution in multi-process environments
-            sem_remove($this->semaphore);
+            // Use with caution in multi-process environments.
+            // Suppress warnings in case another Mutex instance sharing
+            // the same semaphore key already removed it, or the
+            // shutdown function already ran release() which invalidated
+            // the resource.
+            @sem_remove($this->semaphore);
+            $this->semaphore = null;
         }
     }
 
