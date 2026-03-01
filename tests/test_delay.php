@@ -76,7 +76,7 @@ main(function () {
         Delay::new(300);
         var_dump('Inside fiber delay done');
     });
-    Thread::wait();
+    Thread::await();
     $elapsed = (microtime(true) - $start) * 1000;
     var_dump('Elapsed is reasonable: ' . ($elapsed >= 250 && $elapsed < 1500 ? 'yes' : 'no (' . round($elapsed) . 'ms)'));
 
@@ -98,9 +98,9 @@ main(function () {
             var_dump('Short delay done');
         });
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
     $shortFirst = (count($order) >= 2 && $order[0] === 'short');
     var_dump('Short finished before long: ' . ($shortFirst ? 'yes' : 'no'));
 
@@ -114,12 +114,12 @@ main(function () {
             return 77;
         });
 
-        $result = $async->wait();
+        $result = $async->await();
         var_dump("Async delay returned: $result");
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 5: Very small delay completes quickly
@@ -130,7 +130,7 @@ main(function () {
         Delay::new(1);
         var_dump('Tiny delay done');
     });
-    Thread::wait();
+    Thread::await();
     $elapsed = (microtime(true) - $start) * 1000;
     var_dump('Elapsed under 200ms: ' . ($elapsed < 200 ? 'yes' : 'no (' . round($elapsed) . 'ms)'));
 
@@ -154,9 +154,9 @@ main(function () {
             Delay::new(200);
         });
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
     $elapsed = (microtime(true) - $start) * 1000;
     var_dump('All 4 delays done');
     var_dump('Total elapsed under 1500ms: ' . ($elapsed < 1500 ? 'yes' : 'no (' . round($elapsed) . 'ms)'));
@@ -181,7 +181,7 @@ main(function () {
         RunBlocking::new(function () use ($ms) {
             Delay::new($ms);
         });
-        Thread::wait();
+        Thread::await();
         $elapsed = (microtime(true) - $start) * 1000;
         // Allow generous tolerance: at least 60% of target, no more than target + 1000ms
         $lower = $ms * 0.6;
@@ -209,9 +209,9 @@ main(function () {
             var_dump('Quick task finished');
         });
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
     $quickFirst = (count($finishOrder) >= 2 && $finishOrder[0] === 'quick');
     var_dump('Quick ran before slow: ' . ($quickFirst ? 'yes' : 'no'));
 

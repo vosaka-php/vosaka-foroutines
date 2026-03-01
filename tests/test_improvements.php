@@ -131,13 +131,13 @@ echo "|   Testing: Idle Sleep, AsyncIO, ForkProcess, Backpressure    |\n";
 echo "+--------------------------------------------------------------+\n";
 
 // ═════════════════════════════════════════════════════════════════════════════
-// IMPROVEMENT 1: Idle Sleep — Thread::wait(), RunBlocking, Delay
+// IMPROVEMENT 1: Idle Sleep — Thread::await(), RunBlocking, Delay
 // ═════════════════════════════════════════════════════════════════════════════
 
 echo "\n\n--- IMPROVEMENT 1: Idle Sleep (anti CPU-spin) ---";
 
 main(function () {
-    test("Thread::wait completes without hanging", function () {
+    test("Thread::await completes without hanging", function () {
         RunBlocking::new(function () {
             $results = [];
 
@@ -151,7 +151,7 @@ main(function () {
                 $results[] = "B";
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_eq(2, count($results), " — both tasks should complete");
             assert_eq(
@@ -172,7 +172,7 @@ main(function () {
                 $result = 42;
             });
 
-            Thread::wait();
+            Thread::await();
         });
 
         assert_eq(42, $result, " — Launch inside RunBlocking should complete");
@@ -213,7 +213,7 @@ main(function () {
                 $order[] = 3;
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_eq(
                 [3, 2, 1],
@@ -224,20 +224,20 @@ main(function () {
     });
 
     test(
-        "Thread::wait does not busy-wait indefinitely on empty queue",
+        "Thread::await does not busy-wait indefinitely on empty queue",
         function () {
             $start = TimeUtils::currentTimeMillis();
 
             RunBlocking::new(function () {
-                // No Launch jobs — Thread::wait should return immediately
-                Thread::wait();
+                // No Launch jobs — Thread::await should return immediately
+                Thread::await();
             });
 
             $elapsed = TimeUtils::elapsedTimeMillis($start);
             assert_lt(
                 $elapsed,
                 100,
-                " — empty Thread::wait should return quickly, got {$elapsed}ms",
+                " — empty Thread::await should return quickly, got {$elapsed}ms",
             );
         },
     );
@@ -286,7 +286,7 @@ main(function () {
                 $content = AsyncIO::fileGetContents($testFile);
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_true(
                 $content !== null,
@@ -314,7 +314,7 @@ main(function () {
                 $written = AsyncIO::filePutContents($testFile, $data);
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_eq(
                 strlen($data),
@@ -351,7 +351,7 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_true(
                 $thrown,
@@ -378,7 +378,7 @@ main(function () {
                 $r2 = AsyncIO::fileGetContents($file2);
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_eq(
                 10000,
@@ -414,7 +414,7 @@ main(function () {
                 );
             });
 
-            Thread::wait();
+            Thread::await();
 
             $content = file_get_contents($testFile);
             assert_eq(
@@ -435,7 +435,7 @@ main(function () {
                 $ip = AsyncIO::dnsResolve("localhost");
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_true($ip !== null, " — dnsResolve should return a result");
             assert_true(
@@ -453,7 +453,7 @@ main(function () {
                 $ip = AsyncIO::dnsResolve("127.0.0.1");
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_eq(
                 "127.0.0.1",
@@ -491,7 +491,7 @@ main(function () {
         },
     );
 
-    test("AsyncIO integrates with Thread::wait scheduler loop", function () {
+    test("AsyncIO integrates with Thread::await scheduler loop", function () {
         RunBlocking::new(function () {
             $results = [];
 
@@ -509,7 +509,7 @@ main(function () {
                 $results[] = "delay:done";
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_eq(2, count($results), " — both tasks should complete");
         });
@@ -546,10 +546,10 @@ main(function () {
                         $async = $fork->run(function () {
                             return 42 * 3;
                         });
-                        $result = $async->wait();
+                        $result = $async->await();
                     });
 
-                    Thread::wait();
+                    Thread::await();
 
                     assert_eq(
                         126,
@@ -569,10 +569,10 @@ main(function () {
                     $async = $fork->run(function () {
                         return "hello from fork";
                     });
-                    $result = $async->wait();
+                    $result = $async->await();
                 });
 
-                Thread::wait();
+                Thread::await();
 
                 assert_eq("hello from fork", $result);
             });
@@ -587,10 +587,10 @@ main(function () {
                     $async = $fork->run(function () {
                         return ["a" => 1, "b" => [2, 3]];
                     });
-                    $result = $async->wait();
+                    $result = $async->await();
                 });
 
-                Thread::wait();
+                Thread::await();
 
                 assert_eq(["a" => 1, "b" => [2, 3]], $result);
             });
@@ -605,10 +605,10 @@ main(function () {
                     $async = $fork->run(function () {
                         return null;
                     });
-                    $result = $async->wait();
+                    $result = $async->await();
                 });
 
-                Thread::wait();
+                Thread::await();
 
                 assert_eq(null, $result, " — null result should be preserved");
             });
@@ -626,11 +626,11 @@ main(function () {
                             usleep(10000); // 10ms work
                             return "fork-{$idx}";
                         });
-                        $results[$idx] = $async->wait();
+                        $results[$idx] = $async->await();
                     });
                 }
 
-                Thread::wait();
+                Thread::await();
 
                 assert_eq(3, count($results), " — all 3 forks should complete");
                 for ($i = 0; $i < 3; $i++) {
@@ -675,10 +675,10 @@ main(function () {
                         $async = $fork->run(function () {
                             return "fallback-works";
                         });
-                        $result = $async->wait();
+                        $result = $async->await();
                     });
 
-                    Thread::wait();
+                    Thread::await();
 
                     assert_eq(
                         "fallback-works",
@@ -718,10 +718,10 @@ main(function () {
                 Launch::new(function () use (&$result) {
                     $result = Async::new(function () {
                         return "via-worker";
-                    }, Dispatchers::IO)->wait();
+                    }, Dispatchers::IO)->await();
                 });
 
-                Thread::wait();
+                Thread::await();
 
                 assert_eq(
                     "via-worker",
@@ -1337,7 +1337,7 @@ main(function () {
                 $flow->complete();
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_true(
                 count($collected) > 0,
@@ -1366,7 +1366,7 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
 
             assert_true(
                 count($emissions) >= 1,

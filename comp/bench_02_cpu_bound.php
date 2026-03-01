@@ -19,7 +19,7 @@
  *   2. Multiple independent computations in fibers vs sequential
  *   3. Fine-grained vs coarse-grained yielding
  *   4. Fiber creation/teardown overhead
- *   5. Async::new + wait overhead for CPU tasks
+ *   5. Async::new + await overhead for CPU tasks
  *   6. Comparison with Dispatchers::IO (offload to child process)
  *
  * Expected results:
@@ -176,7 +176,7 @@ main(function () {
         RunBlocking::new(function () use ($n, &$result) {
             $result = sumPrimesUpTo($n);
         });
-        Thread::wait();
+        Thread::await();
         return $result;
     });
     BenchHelper::timing("Async (RunBlocking wrapper):", $asyncMs);
@@ -227,9 +227,9 @@ main(function () {
                     $results[$i] = sumPrimesUpTo($n);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         ksort($results);
         return array_values($results);
     });
@@ -277,9 +277,9 @@ main(function () {
                     $sum += $i;
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Async (500 Launch fibers):", $asyncMs);
@@ -323,9 +323,9 @@ main(function () {
                     Pause::new();
                 }
             });
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Async (1000 yields):", $asyncMs);
 
@@ -342,7 +342,7 @@ main(function () {
 
     // ═════════════════════════════════════════════════════════════════
     // Test 5: Async/Await overhead for CPU tasks
-    // 10 × Async::new() + ->wait() each computing fibIterative(50)
+    // 10 × Async::new() + ->await() each computing fibIterative(50)
     // ═════════════════════════════════════════════════════════════════
     BenchHelper::subHeader("Test 5: Async/Await overhead — 10×fib(50)");
 
@@ -376,10 +376,10 @@ main(function () {
                 });
             }
             foreach ($handles as $h) {
-                $results[] = $h->wait();
+                $results[] = $h->await();
             }
         });
-        Thread::wait();
+        Thread::await();
         return $results;
     });
     BenchHelper::timing("Async (10 Async::new):", $asyncMs);
@@ -390,7 +390,7 @@ main(function () {
         "10×fib(50) await",
         $blockingMs,
         $asyncMs,
-        "Async::new + wait cost",
+        "Async::new + await cost",
     );
 
     // ═════════════════════════════════════════════════════════════════
@@ -420,9 +420,9 @@ main(function () {
             $async = Async::new(function () use ($matA, $matB, $size) {
                 return matMul($matA, $matB, $size);
             });
-            $result = $async->wait();
+            $result = $async->await();
         });
-        Thread::wait();
+        Thread::await();
         return $result;
     });
     BenchHelper::timing("Async (fiber-wrapped):", $asyncMs);
@@ -474,10 +474,10 @@ main(function () {
                 });
             }
             foreach ($handles as $idx => $h) {
-                $results[$idx] = $h->wait();
+                $results[$idx] = $h->await();
             }
         });
-        Thread::wait();
+        Thread::await();
         return $results;
     });
     BenchHelper::timing("Async (3 fibers):", $asyncMs);
@@ -519,9 +519,9 @@ main(function () {
             $async = Async::new(function () use ($n) {
                 return sumPrimesUpTo($n);
             }, Dispatchers::IO);
-            $result = $async->wait();
+            $result = $async->await();
         });
-        Thread::wait();
+        Thread::await();
         return $result;
     });
     BenchHelper::timing("Dispatchers::IO (child proc):", $ioMs);
@@ -578,9 +578,9 @@ main(function () {
                     Delay::new($delayMs);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Async (concurrent):", $asyncMs);
 
@@ -620,9 +620,9 @@ main(function () {
                         sumPrimesUpTo($n);
                     });
                 }
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
         });
 
         $overhead = $bMs > 0 ? (($aMs - $bMs) / $bMs) * 100.0 : 0.0;

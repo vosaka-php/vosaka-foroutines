@@ -34,7 +34,7 @@
  *   "Is running before execution: no"
  *   "Is completed before execution: no"
  *   "Is final before execution: no"
- *   "=== Test 3: Job completes after Thread::wait ==="
+ *   "=== Test 3: Job completes after Thread::await ==="
  *   "Task ran"
  *   "Is completed: yes"
  *   "Is final: yes"
@@ -82,7 +82,7 @@
  *   "All Job lifecycle tests passed"
  */
 
-require '../vendor/autoload.php';
+require "../vendor/autoload.php";
 
 use vosaka\foroutines\Delay;
 use vosaka\foroutines\Job;
@@ -97,342 +97,372 @@ main(function () {
     // ==========================================================
     // Test 1: JobState enum values and isFinal()
     // ==========================================================
-    var_dump('=== Test 1: JobState enum values ===');
-    var_dump('PENDING value: ' . JobState::PENDING->value);
-    var_dump('RUNNING value: ' . JobState::RUNNING->value);
-    var_dump('COMPLETED value: ' . JobState::COMPLETED->value);
-    var_dump('FAILED value: ' . JobState::FAILED->value);
-    var_dump('CANCELLED value: ' . JobState::CANCELLED->value);
-    var_dump('PENDING isFinal: ' . (JobState::PENDING->isFinal() ? 'yes' : 'no'));
-    var_dump('RUNNING isFinal: ' . (JobState::RUNNING->isFinal() ? 'yes' : 'no'));
-    var_dump('COMPLETED isFinal: ' . (JobState::COMPLETED->isFinal() ? 'yes' : 'no'));
-    var_dump('FAILED isFinal: ' . (JobState::FAILED->isFinal() ? 'yes' : 'no'));
-    var_dump('CANCELLED isFinal: ' . (JobState::CANCELLED->isFinal() ? 'yes' : 'no'));
+    var_dump("=== Test 1: JobState enum values ===");
+    var_dump("PENDING value: " . JobState::PENDING->value);
+    var_dump("RUNNING value: " . JobState::RUNNING->value);
+    var_dump("COMPLETED value: " . JobState::COMPLETED->value);
+    var_dump("FAILED value: " . JobState::FAILED->value);
+    var_dump("CANCELLED value: " . JobState::CANCELLED->value);
+    var_dump(
+        "PENDING isFinal: " . (JobState::PENDING->isFinal() ? "yes" : "no"),
+    );
+    var_dump(
+        "RUNNING isFinal: " . (JobState::RUNNING->isFinal() ? "yes" : "no"),
+    );
+    var_dump(
+        "COMPLETED isFinal: " . (JobState::COMPLETED->isFinal() ? "yes" : "no"),
+    );
+    var_dump("FAILED isFinal: " . (JobState::FAILED->isFinal() ? "yes" : "no"));
+    var_dump(
+        "CANCELLED isFinal: " . (JobState::CANCELLED->isFinal() ? "yes" : "no"),
+    );
 
     // ==========================================================
     // Test 2: Launch creates a job in correct initial state
     // ==========================================================
-    var_dump('=== Test 2: Launch creates a job in correct initial state ===');
+    var_dump("=== Test 2: Launch creates a job in correct initial state ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             Delay::new(100);
         });
         // Right after Launch::new, the job should be pending (not yet started by scheduler)
-        var_dump('Job created, status: ' . $job->getStatus()->value);
-        var_dump('Is running before execution: ' . ($job->isRunning() ? 'yes' : 'no'));
-        var_dump('Is completed before execution: ' . ($job->isCompleted() ? 'yes' : 'no'));
-        var_dump('Is final before execution: ' . ($job->isFinal() ? 'yes' : 'no'));
+        var_dump("Job created, status: " . $job->getStatus()->value);
+        var_dump(
+            "Is running before execution: " .
+                ($job->isRunning() ? "yes" : "no"),
+        );
+        var_dump(
+            "Is completed before execution: " .
+                ($job->isCompleted() ? "yes" : "no"),
+        );
+        var_dump(
+            "Is final before execution: " . ($job->isFinal() ? "yes" : "no"),
+        );
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
-    // Test 3: Job completes after Thread::wait
+    // Test 3: Job completes after Thread::await
     // ==========================================================
-    var_dump('=== Test 3: Job completes after Thread::wait ===');
+    var_dump("=== Test 3: Job completes after Thread::await ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
-            var_dump('Task ran');
+            var_dump("Task ran");
         });
 
-        Thread::wait();
+        Thread::await();
 
-        var_dump('Is completed: ' . ($job->isCompleted() ? 'yes' : 'no'));
-        var_dump('Is final: ' . ($job->isFinal() ? 'yes' : 'no'));
-        var_dump('Status: ' . $job->getStatus()->value);
-        var_dump('End time is set: ' . ($job->getEndTime() !== null ? 'yes' : 'no'));
+        var_dump("Is completed: " . ($job->isCompleted() ? "yes" : "no"));
+        var_dump("Is final: " . ($job->isFinal() ? "yes" : "no"));
+        var_dump("Status: " . $job->getStatus()->value);
+        var_dump(
+            "End time is set: " . ($job->getEndTime() !== null ? "yes" : "no"),
+        );
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 4: Job cancellation
     // ==========================================================
-    var_dump('=== Test 4: Job cancellation ===');
+    var_dump("=== Test 4: Job cancellation ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             Delay::new(10000); // long delay - should be cancelled before it completes
-            var_dump('This should NOT print');
+            var_dump("This should NOT print");
         });
 
-        var_dump('Status before cancel: ' . $job->getStatus()->value);
+        var_dump("Status before cancel: " . $job->getStatus()->value);
         $job->cancel();
-        var_dump('Is cancelled: ' . ($job->isCancelled() ? 'yes' : 'no'));
-        var_dump('Is final: ' . ($job->isFinal() ? 'yes' : 'no'));
-        var_dump('Status: ' . $job->getStatus()->value);
+        var_dump("Is cancelled: " . ($job->isCancelled() ? "yes" : "no"));
+        var_dump("Is final: " . ($job->isFinal() ? "yes" : "no"));
+        var_dump("Status: " . $job->getStatus()->value);
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 5: Cancel after complete throws RuntimeException
     // ==========================================================
-    var_dump('=== Test 5: Cancel after complete throws ===');
+    var_dump("=== Test 5: Cancel after complete throws ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             // Quick task
         });
 
-        Thread::wait();
+        Thread::await();
 
         try {
             $job->cancel();
-            var_dump('ERROR: cancel after complete did not throw');
+            var_dump("ERROR: cancel after complete did not throw");
         } catch (RuntimeException $e) {
-            var_dump('Caught: ' . $e->getMessage());
+            var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 6: Cancel after failed throws
     // ==========================================================
-    var_dump('=== Test 6: Cancel after failed throws ===');
+    var_dump("=== Test 6: Cancel after failed throws ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
-            throw new RuntimeException('intentional failure');
+            throw new RuntimeException("intentional failure");
         });
 
         try {
-            Thread::wait();
+            Thread::await();
         } catch (RuntimeException $e) {
             // Expected - the job threw
         }
 
         try {
             $job->cancel();
-            var_dump('ERROR: cancel after fail did not throw');
+            var_dump("ERROR: cancel after fail did not throw");
         } catch (RuntimeException $e) {
-            var_dump('Caught cancel-after-fail: ' . $e->getMessage());
+            var_dump("Caught cancel-after-fail: " . $e->getMessage());
         }
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 7: invokeOnCompletion fires on cancel
     // ==========================================================
-    var_dump('=== Test 7: invokeOnCompletion callback fires on cancel ===');
+    var_dump("=== Test 7: invokeOnCompletion callback fires on cancel ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             Delay::new(10000);
         });
 
         $job->invokeOnCompletion(function (Job $j) {
-            var_dump('invokeOnCompletion fired, state: ' . $j->getStatus()->value);
+            var_dump(
+                "invokeOnCompletion fired, state: " . $j->getStatus()->value,
+            );
         });
 
         $job->cancel();
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 8: invokeOnCompletion fires on complete
     // ==========================================================
-    var_dump('=== Test 8: invokeOnCompletion callback fires on complete ===');
+    var_dump("=== Test 8: invokeOnCompletion callback fires on complete ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
-            var_dump('Completion task executed');
+            var_dump("Completion task executed");
         });
 
         $job->invokeOnCompletion(function (Job $j) {
-            var_dump('invokeOnCompletion fired, state: ' . $j->getStatus()->value);
+            var_dump(
+                "invokeOnCompletion fired, state: " . $j->getStatus()->value,
+            );
         });
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 9: invokeOnCompletion on already final job throws
     // ==========================================================
-    var_dump('=== Test 9: invokeOnCompletion on already final job throws ===');
+    var_dump("=== Test 9: invokeOnCompletion on already final job throws ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             // Quick task
         });
 
-        Thread::wait();
+        Thread::await();
 
         try {
             $job->invokeOnCompletion(function (Job $j) {
-                var_dump('This should not run');
+                var_dump("This should not run");
             });
-            var_dump('ERROR: invokeOnCompletion on final job did not throw');
+            var_dump("ERROR: invokeOnCompletion on final job did not throw");
         } catch (RuntimeException $e) {
-            var_dump('Caught: ' . $e->getMessage());
+            var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 10: onJoin callback fires on complete
     // ==========================================================
-    var_dump('=== Test 10: onJoin callback fires on complete ===');
+    var_dump("=== Test 10: onJoin callback fires on complete ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
-            var_dump('Join task executed');
+            var_dump("Join task executed");
         });
 
         $job->onJoin(function (Job $j) {
-            var_dump('onJoin fired, state: ' . $j->getStatus()->value);
+            var_dump("onJoin fired, state: " . $j->getStatus()->value);
         });
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 11: onJoin on already final job throws
     // ==========================================================
-    var_dump('=== Test 11: onJoin on already final job throws ===');
+    var_dump("=== Test 11: onJoin on already final job throws ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             // Quick task
         });
 
-        Thread::wait();
+        Thread::await();
 
         try {
             $job->onJoin(function (Job $j) {
-                var_dump('This should not run');
+                var_dump("This should not run");
             });
-            var_dump('ERROR: onJoin on final job did not throw');
+            var_dump("ERROR: onJoin on final job did not throw");
         } catch (RuntimeException $e) {
-            var_dump('Caught: ' . $e->getMessage());
+            var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 12: cancelAfter sets timeout (isTimedOut)
     // ==========================================================
-    var_dump('=== Test 12: cancelAfter sets timeout ===');
+    var_dump("=== Test 12: cancelAfter sets timeout ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             Delay::new(5000);
         });
 
         $job->cancelAfter(10.0); // 10 second timeout - won't trigger yet
-        var_dump('isTimedOut before time passes: ' . ($job->isTimedOut() ? 'yes' : 'no'));
+        var_dump(
+            "isTimedOut before time passes: " .
+                ($job->isTimedOut() ? "yes" : "no"),
+        );
 
         $job->cancel(); // cancel manually so we don't wait
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 13: cancelAfter on already final job throws
     // ==========================================================
-    var_dump('=== Test 13: cancelAfter on already final job throws ===');
+    var_dump("=== Test 13: cancelAfter on already final job throws ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             // Quick task
         });
 
-        Thread::wait();
+        Thread::await();
 
         try {
             $job->cancelAfter(5.0);
-            var_dump('ERROR: cancelAfter on final job did not throw');
+            var_dump("ERROR: cancelAfter on final job did not throw");
         } catch (RuntimeException $e) {
-            var_dump('Caught: ' . $e->getMessage());
+            var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 14: getStartTime returns a valid time
     // ==========================================================
-    var_dump('=== Test 14: getStartTime returns a valid time ===');
+    var_dump("=== Test 14: getStartTime returns a valid time ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             // Quick task
         });
 
         $startTime = $job->getStartTime();
-        var_dump('Start time is positive: ' . ($startTime > 0 ? 'yes' : 'no'));
+        var_dump("Start time is positive: " . ($startTime > 0 ? "yes" : "no"));
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 15: getEndTime is null before completion
     // ==========================================================
-    var_dump('=== Test 15: getEndTime is null before completion ===');
+    var_dump("=== Test 15: getEndTime is null before completion ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             Delay::new(100);
         });
 
         $endTime = $job->getEndTime();
-        var_dump('End time before completion: ' . ($endTime === null ? 'NULL' : $endTime));
+        var_dump(
+            "End time before completion: " .
+                ($endTime === null ? "NULL" : $endTime),
+        );
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 16: Multiple invokeOnCompletion callbacks
     // ==========================================================
-    var_dump('=== Test 16: Multiple invokeOnCompletion callbacks ===');
+    var_dump("=== Test 16: Multiple invokeOnCompletion callbacks ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             // Quick task
         });
 
         $job->invokeOnCompletion(function (Job $j) {
-            var_dump('Callback 1 fired');
+            var_dump("Callback 1 fired");
         });
         $job->invokeOnCompletion(function (Job $j) {
-            var_dump('Callback 2 fired');
+            var_dump("Callback 2 fired");
         });
         $job->invokeOnCompletion(function (Job $j) {
-            var_dump('Callback 3 fired');
+            var_dump("Callback 3 fired");
         });
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 17: Multiple onJoin callbacks
     // ==========================================================
-    var_dump('=== Test 17: Multiple onJoin callbacks ===');
+    var_dump("=== Test 17: Multiple onJoin callbacks ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             // Quick task
         });
 
         $job->onJoin(function (Job $j) {
-            var_dump('Join callback A fired');
+            var_dump("Join callback A fired");
         });
         $job->onJoin(function (Job $j) {
-            var_dump('Join callback B fired');
+            var_dump("Join callback B fired");
         });
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ==========================================================
     // Test 18: Job with Delay completes normally
     // ==========================================================
-    var_dump('=== Test 18: Job with Delay completes normally ===');
+    var_dump("=== Test 18: Job with Delay completes normally ===");
     RunBlocking::new(function () {
         $job = Launch::new(function () {
             Delay::new(200);
-            var_dump('Delayed task done');
+            var_dump("Delayed task done");
         });
 
-        Thread::wait();
+        Thread::await();
 
-        var_dump('Delayed job completed: ' . ($job->isCompleted() ? 'yes' : 'no'));
+        var_dump(
+            "Delayed job completed: " . ($job->isCompleted() ? "yes" : "no"),
+        );
     });
-    Thread::wait();
+    Thread::await();
 
-    var_dump('All Job lifecycle tests passed');
+    var_dump("All Job lifecycle tests passed");
 });

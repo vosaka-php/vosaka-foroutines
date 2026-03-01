@@ -13,10 +13,10 @@
  *   - Cancellation of a job before it completes
  *   - Cancellation does not affect already-completed siblings
  *   - Launch with Delay ordering (shortest delay finishes first)
- *   - Async wait inside Launch
- *   - Multiple Async waits in sequence inside one Launch
+ *   - Async await inside Launch
+ *   - Multiple Async awaits in sequence inside one Launch
  *   - Parent collects results from child Launches via shared state
- *   - Deep Async return value propagation (nested Async::wait)
+ *   - Deep Async return value propagation (nested Async::await)
  *   - Combining Launch + Async in same scope
  *   - RunBlocking as a structured scope
  *   - Structured scope enforces completion order (sequential RunBlocking)
@@ -46,9 +46,9 @@
  *   "Medium"
  *   "Slowest"
  *   "Order: [Fastest, Medium, Slowest]"
- *   "=== Test 9: Async wait inside Launch ==="
+ *   "=== Test 9: Async await inside Launch ==="
  *   "Launch got async value: 77"
- *   "=== Test 10: Multiple Async waits in sequence ==="
+ *   "=== Test 10: Multiple Async awaits in sequence ==="
  *   "Sequential sum: 60"
  *   "=== Test 11: Parent collects results via shared state ==="
  *   "Collected results: [10, 20, 30]"
@@ -116,10 +116,10 @@ main(function () {
             $done++;
         });
 
-        Thread::wait();
+        Thread::await();
         var_dump("All $done tasks completed");
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 2: Async value composition
@@ -139,12 +139,12 @@ main(function () {
             return 30;
         });
 
-        $sum = $a->wait() + $b->wait() + $c->wait();
+        $sum = $a->await() + $b->await() + $c->await();
         var_dump("Sum of async results: $sum");
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 3: Sequential async pipeline
@@ -155,24 +155,24 @@ main(function () {
             Delay::new(50);
             return 5;
         });
-        $val1 = $step1->wait();
+        $val1 = $step1->await();
 
         $step2 = Async::new(function () use ($val1) {
             Delay::new(50);
             return $val1 * 2; // 10
         });
-        $val2 = $step2->wait();
+        $val2 = $step2->await();
 
         $step3 = Async::new(function () use ($val2) {
             Delay::new(50);
             return $val2 + 10; // 20
         });
-        $val3 = $step3->wait();
+        $val3 = $step3->await();
 
         var_dump("Pipeline result: $val3");
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 4: Fan-out pattern
@@ -186,10 +186,10 @@ main(function () {
                 $total++;
             });
         }
-        Thread::wait();
+        Thread::await();
         var_dump("Fan-out total: $total");
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 5: Fan-in with shared accumulator
@@ -204,10 +204,10 @@ main(function () {
                 $sum += $v;
             });
         }
-        Thread::wait();
+        Thread::await();
         var_dump("Fan-in sum: $sum");
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 6: Cancel pending job
@@ -221,9 +221,9 @@ main(function () {
         $job->cancel();
         var_dump("Job cancelled: " . ($job->isCancelled() ? "yes" : "no"));
         var_dump("Is final: " . ($job->isFinal() ? "yes" : "no"));
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 7: Cancel does not affect completed sibling
@@ -254,9 +254,9 @@ main(function () {
                 ($completedBeforeCancel ? "yes" : "no"),
         );
         var_dump("Cancelled job state: " . $longJob->getStatus()->value);
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 8: Launch with Delay ordering
@@ -279,32 +279,32 @@ main(function () {
             var_dump("Medium");
             $finishOrder[] = "Medium";
         });
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
     var_dump("Order: [" . implode(", ", $finishOrder) . "]");
 
     // ================================================================
-    // Test 9: Async wait inside Launch
+    // Test 9: Async await inside Launch
     // ================================================================
-    var_dump("=== Test 9: Async wait inside Launch ===");
+    var_dump("=== Test 9: Async await inside Launch ===");
     RunBlocking::new(function () {
         Launch::new(function () {
             $async = Async::new(function () {
                 Delay::new(100);
                 return 77;
             });
-            $val = $async->wait();
+            $val = $async->await();
             var_dump("Launch got async value: $val");
         });
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
-    // Test 10: Multiple Async waits in sequence inside one Launch
+    // Test 10: Multiple Async awaits in sequence inside one Launch
     // ================================================================
-    var_dump("=== Test 10: Multiple Async waits in sequence ===");
+    var_dump("=== Test 10: Multiple Async awaits in sequence ===");
     RunBlocking::new(function () {
         Launch::new(function () {
             $a = Async::new(function () {
@@ -319,12 +319,12 @@ main(function () {
                 Delay::new(50);
                 return 30;
             });
-            $sum = $a->wait() + $b->wait() + $c->wait();
+            $sum = $a->await() + $b->await() + $c->await();
             var_dump("Sequential sum: $sum");
         });
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 11: Parent collects results from child Launches via shared state
@@ -344,11 +344,11 @@ main(function () {
             Delay::new(150);
             $results[] = 30;
         });
-        Thread::wait();
+        Thread::await();
         sort($results);
         var_dump("Collected results: [" . implode(", ", $results) . "]");
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 12: Deep Async return value propagation (4 levels)
@@ -360,15 +360,15 @@ main(function () {
                 return Async::new(function () {
                     return Async::new(function () {
                         return 1000;
-                    })->wait();
-                })->wait();
-            })->wait();
+                    })->await();
+                })->await();
+            })->await();
         });
-        $val = $deep->wait();
+        $val = $deep->await();
         var_dump("Deep value: $val");
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 13: Launch + Async combined in same scope
@@ -384,12 +384,12 @@ main(function () {
             Delay::new(100);
             return 99;
         });
-        $val = $async->wait();
+        $val = $async->await();
         var_dump("Async returned: $val");
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 14: RunBlocking as structured scope waits for all children
@@ -408,10 +408,10 @@ main(function () {
             Delay::new(100);
             var_dump("Child C done");
         });
-        Thread::wait();
+        Thread::await();
         var_dump("All children completed");
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 15: Sequential RunBlocking scopes enforce order
@@ -421,10 +421,10 @@ main(function () {
         Launch::new(function () {
             Delay::new(100);
         });
-        Thread::wait();
+        Thread::await();
         var_dump("Scope 1 done");
     });
-    Thread::wait();
+    Thread::await();
 
     var_dump("Between scopes");
 
@@ -432,10 +432,10 @@ main(function () {
         Launch::new(function () {
             Delay::new(50);
         });
-        Thread::wait();
+        Thread::await();
         var_dump("Scope 2 done");
     });
-    Thread::wait();
+    Thread::await();
 
     var_dump("Final");
 
@@ -451,10 +451,10 @@ main(function () {
                 $counter++;
             });
         }
-        Thread::wait();
+        Thread::await();
         var_dump("Counter: $counter");
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 17: Delay interleaving - fast finishes before slow
@@ -472,9 +472,9 @@ main(function () {
             var_dump("Fast done");
             $order[] = "fast";
         });
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
     $correct =
         count($order) >= 2 && $order[0] === "fast" && $order[1] === "slow";
     var_dump("Fast before slow: " . ($correct ? "yes" : "no"));
@@ -497,11 +497,11 @@ main(function () {
             return "42";
         });
 
-        $composed = $a->wait() . "-" . $b->wait() . "-" . $c->wait();
+        $composed = $a->await() . "-" . $b->await() . "-" . $c->await();
         var_dump("Composed: $composed");
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 19: Launch many tasks (stress test)
@@ -515,10 +515,10 @@ main(function () {
                 $counter++;
             });
         }
-        Thread::wait();
+        Thread::await();
         var_dump("All 20 tasks done, counter: $counter");
     });
-    Thread::wait();
+    Thread::await();
 
     // ================================================================
     // Test 20: Cancel before scheduler runs prevents execution
@@ -531,10 +531,10 @@ main(function () {
             var_dump("This should NOT print");
         });
         $job->cancel();
-        Thread::wait();
+        Thread::await();
         var_dump("Cancelled immediately: " . (!$executed ? "yes" : "no"));
     });
-    Thread::wait();
+    Thread::await();
 
     var_dump("All structured concurrency tests passed");
 });

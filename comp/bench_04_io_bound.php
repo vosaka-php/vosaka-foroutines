@@ -184,9 +184,9 @@ main(function () {
                     file_put_contents(benchTempPath($prefix, $i), $content);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Async (Launch file writes):", $asyncMs);
     cleanupBenchFiles($prefix, $fileCount);
@@ -245,9 +245,9 @@ main(function () {
                     $data[$i] = file_get_contents(benchTempPath($prefix, $i));
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return count($data);
     });
     BenchHelper::timing("Async (Launch file reads):", $asyncMs);
@@ -308,9 +308,9 @@ main(function () {
                     file_get_contents(benchTempPath($prefix . "_r", $i));
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Async (concurrent mixed):", $asyncMs);
     cleanupBenchFiles($prefix . "_w", $mixCount);
@@ -372,9 +372,9 @@ main(function () {
                     ];
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         ksort($responses);
         return array_values($responses);
     });
@@ -443,9 +443,9 @@ main(function () {
                     ];
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         ksort($results);
         return array_values($results);
     });
@@ -466,7 +466,7 @@ main(function () {
     // ═════════════════════════════════════════════════════════════════
     // Test 6: Async/Await fan-out with result collection
     //
-    // Same as Test 5 but uses Async::new + ->wait() to collect results.
+    // Same as Test 5 but uses Async::new + ->await() to collect results.
     // This tests the Async/Await overhead specifically.
     // ═════════════════════════════════════════════════════════════════
     BenchHelper::subHeader("Test 6: Async/Await fan-out — 8 endpoints × 100ms");
@@ -508,10 +508,10 @@ main(function () {
             }
             // Await all results
             foreach ($handles as $h) {
-                $results[] = $h->wait();
+                $results[] = $h->await();
             }
         });
-        Thread::wait();
+        Thread::await();
         return $results;
     });
     BenchHelper::timing("Async (Async/Await):", $asyncMs);
@@ -529,7 +529,7 @@ main(function () {
         "Async/Await 8×100ms",
         $blockingMs,
         $asyncMs,
-        "Async::new + wait",
+        "Async::new + await",
     );
 
     // ═════════════════════════════════════════════════════════════════
@@ -594,9 +594,9 @@ main(function () {
                     Delay::new($notifyLatencyMs); // simulate sending notification
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Async (concurrent write+delay):", $asyncMs);
     cleanupBenchFiles($prefix, $taskCount);
@@ -666,9 +666,9 @@ main(function () {
                 fclose($handle);
                 return $totalLen;
             });
-            $async->wait();
+            $async->await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Async (chunked 16KB writes):", $asyncMs);
 
@@ -744,10 +744,10 @@ main(function () {
                 }, Dispatchers::IO);
             }
             foreach ($handles as $h) {
-                $h->wait();
+                $h->await();
             }
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Dispatchers::IO (child procs):", $ioMs);
     cleanupBenchFiles($prefix . "_a", $ioCount);
@@ -834,10 +834,10 @@ main(function () {
                 });
             }
             foreach ($handles as $name => $h) {
-                $results[$name] = $h->wait();
+                $results[$name] = $h->await();
             }
         });
-        Thread::wait();
+        Thread::await();
         return $results;
     });
     BenchHelper::timing("Async (concurrent queries):", $asyncMs);
@@ -918,9 +918,9 @@ main(function () {
                     Delay::new($notifyMs);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing("Async (concurrent):", $asyncMs);
     cleanupBenchFiles($prefix, count($ioTasks));
@@ -960,9 +960,9 @@ main(function () {
                         Delay::new($simLatency);
                     });
                 }
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
         });
 
         $speedup = $bMs > 0 ? $bMs / $aMs : 0.0;

@@ -43,7 +43,7 @@ final class Async
     }
 
     /**
-     * Waits for the asynchronous task to complete and returns its result.
+     * Awaits the asynchronous task to complete and returns its result.
      *
      * When called from within a Fiber context (e.g. inside a Launch job),
      * this method yields control back to the scheduler between resume attempts
@@ -58,7 +58,7 @@ final class Async
      *
      * @return mixed The result of the asynchronous task.
      */
-    public function wait(): mixed
+    public function await(): mixed
     {
         if (!$this->fiber->isStarted()) {
             $this->fiber->start();
@@ -66,7 +66,7 @@ final class Async
 
         if (Fiber::getCurrent() !== null) {
             // We are inside a Fiber — use Pause to cooperatively yield
-            // so the outer scheduler (Thread::wait / runOnce) can drive
+            // so the outer scheduler (Thread::await / runOnce) can drive
             // other fibers forward between our resume attempts.
             return $this->waitInsideFiber();
         }

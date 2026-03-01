@@ -165,9 +165,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Async (channel trySend/tryRecv):", $asyncMs);
@@ -268,9 +268,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Async (5 producers → channel):", $asyncMs);
@@ -362,9 +362,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $finalSum;
     });
     BenchHelper::timing("Async (channel pipeline):", $asyncMs);
@@ -416,9 +416,9 @@ main(function () {
                     }
                 });
 
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
         });
 
         $perMsg = $ms / $msgCount;
@@ -489,9 +489,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $totalLen;
     });
     BenchHelper::timing("Async (channel 4KB msgs):", $asyncMs);
@@ -713,9 +713,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
 
     $perMsgUs = ($asyncMs / $msgCount) * 1000.0; // µs per message
@@ -854,9 +854,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $results;
     });
     BenchHelper::timing("Async (pipelined stages):", $asyncMs);
@@ -923,9 +923,9 @@ main(function () {
                     }
                 });
 
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
         });
 
         $perMsg = ($ms / $count) * 1000.0; // µs
@@ -999,9 +999,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $count;
     });
     BenchHelper::timing("Async (channel mixed types):", $asyncMs);

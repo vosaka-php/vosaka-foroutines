@@ -30,7 +30,7 @@ final class WorkerPool
      * workers, returns, and running counts inherited from the parent
      * process. Without this, the child process would see phantom
      * entries from the parent's WorkerPool and either spin forever
-     * in Thread::wait() or attempt to drive workers that don't exist
+     * in Thread::await() or attempt to drive workers that don't exist
      * in the child's address space.
      */
     public static function resetState(): void
@@ -120,7 +120,7 @@ final class WorkerPool
             Launch::new(function () use ($worker, $id) {
                 try {
                     self::$running++;
-                    $result = $worker->run()->wait();
+                    $result = $worker->run()->await();
                     self::$returns[$id] = $result;
                 } catch (Exception $e) {
                     self::$returns[$id] = "Error: " . $e->getMessage();

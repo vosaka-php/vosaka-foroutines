@@ -72,7 +72,7 @@ final class Launch extends Job
     ): Launch {
         if ($dispatcher === Dispatchers::IO) {
             $callable = function () use ($callable) {
-                $result = WorkerPool::addAsync($callable)->wait();
+                $result = WorkerPool::addAsync($callable)->await();
                 return $result;
             };
             return self::makeLaunch($callable);
@@ -80,7 +80,7 @@ final class Launch extends Job
 
         if ($dispatcher === Dispatchers::MAIN) {
             $callable = function () use ($callable) {
-                $result = Async::new($callable, Dispatchers::MAIN)->wait();
+                $result = Async::new($callable, Dispatchers::MAIN)->await();
                 return $result;
             };
             return self::makeLaunch($callable);

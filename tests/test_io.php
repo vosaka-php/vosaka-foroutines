@@ -34,8 +34,8 @@ main(function () {
         });
         var_dump("Hello,");
 
-        Thread::wait();
-    }, Dispatchers::IO);
+        Thread::await();
+    }, Dispatchers::IO); // Run asynchronously in IO thread to test if the class can be shared between threads
 
-    Thread::wait();
+    Thread::await();
 });

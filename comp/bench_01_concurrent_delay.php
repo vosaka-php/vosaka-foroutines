@@ -64,9 +64,9 @@ main(function () {
                     Delay::new($delayMs);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing('Async (concurrent Delay):', $asyncMs);
 
@@ -96,9 +96,9 @@ main(function () {
                     Delay::new($delayMs);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing('Async (concurrent Delay):', $asyncMs);
 
@@ -128,9 +128,9 @@ main(function () {
                     Delay::new($delayMs);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing('Async (concurrent Delay):', $asyncMs);
 
@@ -160,9 +160,9 @@ main(function () {
                     Delay::new($ms);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing('Async (concurrent):', $asyncMs);
 
@@ -171,7 +171,7 @@ main(function () {
 
     // ─────────────────────────────────────────────────────────────────
     // Test 5: Async::new + await pattern (return values)
-    // 5 tasks × 150ms, each returns a value → collect via ->wait()
+    // 5 tasks × 150ms, each returns a value → collect via ->await()
     // ─────────────────────────────────────────────────────────────────
     BenchHelper::subHeader('Test 5: Async/Await with return values (5×150ms)');
 
@@ -199,11 +199,11 @@ main(function () {
                 });
             }
             foreach ($asyncHandles as $handle) {
-                $results[] = $handle->wait();
+                $results[] = $handle->await();
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $results;
     });
     BenchHelper::timing('Async (concurrent await):', $asyncMs);
@@ -236,9 +236,9 @@ main(function () {
                     Delay::new($delayMs);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing('Async (concurrent):', $asyncMs);
 
@@ -276,9 +276,9 @@ main(function () {
                     }
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing('Async (nested concurrent):', $asyncMs);
 
@@ -308,9 +308,9 @@ main(function () {
                     Delay::new($delayMs);
                 });
             }
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
     });
     BenchHelper::timing('Async (concurrent):', $asyncMs);
 

@@ -32,7 +32,7 @@ final class Thread
      * processes and keeps idle CPU usage near zero — similar to how libuv
      * uses epoll/kqueue to sleep until an event arrives.
      */
-    public static function wait(): void
+    public static function await(): void
     {
         while (
             !WorkerPool::isEmpty() ||

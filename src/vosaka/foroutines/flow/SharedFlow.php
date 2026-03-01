@@ -547,7 +547,7 @@ final class SharedFlow extends BaseFlow
      *
      * If not inside a Fiber, falls back to a spin-loop with Pause::new()
      * (which is a no-op outside fibers but at least drives the scheduler
-     * in contexts like RunBlocking or Thread::wait).
+     * in contexts like RunBlocking or Thread::await).
      *
      * @param mixed $value The value waiting to be emitted.
      */

@@ -123,7 +123,7 @@ main(function () {
             return true;
         }, Dispatchers::IO);
 
-        $async->wait();
+        $async->await();
 
         // Main reads — data is still in the file because the child
         // was a connector and did NOT delete it.
@@ -132,9 +132,9 @@ main(function () {
             var_dump("Received: $val");
         }
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($ch1);
     var_dump("Test 1 passed");
@@ -165,11 +165,11 @@ main(function () {
             return $sum;
         }, Dispatchers::IO);
 
-        $result = $async->wait();
+        $result = $async->await();
         var_dump("IO consumer sum: $result");
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($ch2);
     var_dump("Test 2 passed");
@@ -196,7 +196,7 @@ main(function () {
             }
             return true;
         }, Dispatchers::IO);
-        $producer->wait();
+        $producer->await();
 
         // Phase 2: IO consumer
         $consumer = Async::new(function () {
@@ -210,12 +210,12 @@ main(function () {
             }
             return $sum;
         }, Dispatchers::IO);
-        $result = $consumer->wait();
+        $result = $consumer->await();
         var_dump("IO consumer sum of squares: $result");
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($ch3);
     var_dump("Test 3 passed");
@@ -252,7 +252,7 @@ main(function () {
             return true;
         }, Dispatchers::IO);
 
-        $async->wait();
+        $async->await();
 
         // Main reads all responses
         for ($i = 0; $i < 3; $i++) {
@@ -260,9 +260,9 @@ main(function () {
             var_dump("Pong $i: $pong");
         }
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($chReq);
     teardown($chRes);
@@ -295,7 +295,7 @@ main(function () {
 
         // Wait for all producers
         foreach ($asyncTasks as $task) {
-            $task->wait();
+            $task->await();
         }
 
         // Drain from main
@@ -310,9 +310,9 @@ main(function () {
         var_dump("Fan-in count: " . count($items));
         var_dump("Fan-in sum: " . array_sum($items));
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($ch5);
     var_dump("Test 5 passed");
@@ -338,7 +338,7 @@ main(function () {
             return true;
         }, Dispatchers::IO);
 
-        $async->wait();
+        $async->await();
 
         $intVal = $ch6->tryReceive();
         $floatVal = $ch6->tryReceive();
@@ -353,9 +353,9 @@ main(function () {
             "int=$intVal float=$floatVal string=$strVal bool=$boolStr arrayLen=$arrLen",
         );
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($ch6);
     var_dump("Test 6 passed");
@@ -379,7 +379,7 @@ main(function () {
             return true;
         }, Dispatchers::IO);
 
-        $async->wait();
+        $async->await();
 
         $received = $ch7->tryReceive();
         var_dump(
@@ -390,9 +390,9 @@ main(function () {
             "Content matches: " . ($received === $largePayload ? "yes" : "no"),
         );
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($ch7);
     var_dump("Test 7 passed");
@@ -415,7 +415,7 @@ main(function () {
             return true;
         }, Dispatchers::IO);
 
-        $async->wait();
+        $async->await();
 
         // Drain the item
         $ch8->tryReceive();
@@ -423,9 +423,9 @@ main(function () {
         // isClosed() reloads state from the backing file
         var_dump("Channel closed by IO: " . ($ch8->isClosed() ? "yes" : "no"));
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     $ch8->cleanup();
     var_dump("Test 8 passed");
@@ -447,15 +447,15 @@ main(function () {
             return $ok;
         }, Dispatchers::IO);
 
-        $sent = $async->wait();
+        $sent = $async->await();
         var_dump("IO trySend ok: " . ($sent ? "yes" : "no"));
 
         $val = $ch9->tryReceive();
         var_dump("Main got: $val");
 
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
 
     teardown($ch9);
     var_dump("Test 9 passed");
@@ -493,11 +493,11 @@ main(function () {
             return implode(",", $results);
         }, Dispatchers::IO);
 
-        $result = $async->wait();
+        $result = $async->await();
         var_dump("Pipeline result: $result");
-        Thread::wait();
+        Thread::await();
     });
-    Thread::wait();
+    Thread::await();
     var_dump("Test 10 passed");
 
     var_dump("All Channel IO Dispatcher tests passed!");

@@ -23,7 +23,7 @@ final class Pause
      *
      * Pause is intentionally minimal — it ONLY suspends the current Fiber.
      * Driving the scheduler (Launch::runOnce, WorkerPool::run) is the
-     * responsibility of the top-level event loop (Thread::wait) or
+     * responsibility of the top-level event loop (Thread::await) or
      * Async::waitOutsideFiber. Mixing scheduler calls inside Pause caused
      * nested-runOnce re-entrancy and cross-resuming of fibers from the
      * shared Launch queue, leading to deadlocks in nested Async contexts.

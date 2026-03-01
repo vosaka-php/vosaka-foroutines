@@ -124,7 +124,7 @@ main(function () {
             var_dump('Task 2 done');
         });
 
-        Thread::wait();
+        Thread::await();
     });
 });
 ```
@@ -137,12 +137,12 @@ use vosaka\foroutines\{Async, Dispatchers};
 $result = Async::new(function () {
     Delay::new(100);
     return 42;
-})->wait(); // blocks until result is ready
+})->await(); // blocks until result is ready
 
 // Run in a separate process (IO dispatcher)
 $io = Async::new(function () {
     return file_get_contents('data.txt');
-}, Dispatchers::IO)->wait();
+}, Dispatchers::IO)->await();
 ```
 
 ### WithTimeout
@@ -283,7 +283,7 @@ RunBlocking::new(function () {
         return heavy_io_work();
     }, Dispatchers::IO);
 
-    Thread::wait();
+    Thread::await();
 });
 ```
 
@@ -298,7 +298,7 @@ $async = WorkerPool::addAsync(function () {
     return 'processed';
 });
 
-$result = $async->wait();
+$result = $async->await();
 ```
 
 ---
@@ -340,7 +340,7 @@ main(function () {
             var_dump("Resolved: $ip");
         });
 
-        Thread::wait();
+        Thread::await();
     });
 });
 ```
@@ -392,7 +392,7 @@ $async = $fork->run(function () {
     return expensive_computation();
 });
 
-$result = $async->wait();
+$result = $async->await();
 ```
 
 #### ForkProcess Architecture
@@ -530,7 +530,7 @@ Flow::fromArray(range(1, 1000))
 
 ### Scheduler Improvements — Anti CPU-Spin
 
-All scheduler loops (`Thread::wait()`, `RunBlocking::new()`, `Delay::new()`, `Async::wait()`) now include idle detection. When no subsystem has actionable work on a given tick, a `usleep(500)` (500 microseconds) is inserted to prevent 100% CPU usage.
+All scheduler loops (`Thread::await()`, `RunBlocking::new()`, `Delay::new()`, `Async::await()`) now include idle detection. When no subsystem has actionable work on a given tick, a `usleep(500)` (500 microseconds) is inserted to prevent 100% CPU usage.
 
 Each scheduler tick drives three subsystems:
 

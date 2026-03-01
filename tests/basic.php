@@ -52,15 +52,15 @@ main(function () {
         });
 
         $hello = "Hello, World!";
-        $result = work($hello)->wait();
+        $result = work($hello)->await();
         var_dump("Result from main:", $result);
 
         file_put_contents("tests.txt", "Hello, World! from main");
 
-        Thread::wait();
+        Thread::await();
     }, Dispatchers::IO);
 
-    Thread::wait();
+    Thread::await();
 
     var_dump("Total execution time:", microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . "KB");

@@ -1,10 +1,10 @@
 <?php
 
 /**
- * Test: Async::new() + wait() to retrieve return values
+ * Test: Async::new() + await() to retrieve return values
  *
  * Demonstrates creating async tasks that compute values and using
- * wait() to block until the result is available. Shows that multiple
+ * await() to block until the result is available. Shows that multiple
  * Async tasks run concurrently and their results can be collected.
  *
  * Expected output:
@@ -16,7 +16,7 @@
  *   "All async tasks completed"
  */
 
-require '../vendor/autoload.php';
+require "../vendor/autoload.php";
 
 use vosaka\foroutines\Async;
 use vosaka\foroutines\Delay;
@@ -27,7 +27,7 @@ use function vosaka\foroutines\main;
 
 main(function () {
     RunBlocking::new(function () {
-        var_dump('Starting async tasks...');
+        var_dump("Starting async tasks...");
 
         // Async that returns an integer after a short delay
         $asyncA = Async::new(function () {
@@ -38,7 +38,7 @@ main(function () {
         // Async that returns a string after a longer delay
         $asyncB = Async::new(function () {
             Delay::new(800);
-            return 'hello world';
+            return "hello world";
         });
 
         // Async that does a computation
@@ -53,21 +53,21 @@ main(function () {
 
         // Wait for all results - they run concurrently so total time
         // should be ~800ms (the longest), not 500+800+300=1600ms
-        $resultA = $asyncA->wait();
+        $resultA = $asyncA->await();
         var_dump("Result A: $resultA");
 
-        $resultB = $asyncB->wait();
+        $resultB = $asyncB->await();
         var_dump("Result B: $resultB");
 
-        $resultC = $asyncC->wait();
+        $resultC = $asyncC->await();
         var_dump("Result C: $resultC");
 
-        var_dump('Sum of A + C: ' . ($resultA + $resultC));
+        var_dump("Sum of A + C: " . ($resultA + $resultC));
 
-        Thread::wait();
+        Thread::await();
     });
 
-    Thread::wait();
+    Thread::await();
 
-    var_dump('All async tasks completed');
+    var_dump("All async tasks completed");
 });

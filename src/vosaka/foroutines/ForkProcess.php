@@ -49,7 +49,7 @@ use Generator;
  *   $async = $fork->run(function () {
  *       return heavy_computation();
  *   });
- *   $result = $async->wait();
+ *   $result = $async->await();
  */
 final class ForkProcess
 {
@@ -237,7 +237,7 @@ final class ForkProcess
             // Launch::$map, WorkerPool's internal arrays, and AsyncIO's
             // read/write watchers. These contain stale fibers/jobs/
             // streams from the parent that are meaningless in the child.
-            // If not cleared, Thread::wait() or any scheduler loop
+            // If not cleared, Thread::await() or any scheduler loop
             // running inside the child closure will see these phantom
             // entries and spin forever.
             Launch::$queue = new \SplQueue();

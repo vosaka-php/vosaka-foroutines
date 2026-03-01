@@ -83,7 +83,7 @@ final class AsyncIO
      * Poll all registered stream watchers ONCE using stream_select().
      *
      * This method is designed to be called from the main scheduler loop
-     * (Thread::wait, RunBlocking::new, Delay::new, Async::waitOutsideFiber)
+     * (Thread::await, RunBlocking::new, Delay::new, Async::waitOutsideFiber)
      * on every tick, right alongside WorkerPool::run() and Launch::runOnce().
      *
      * It performs a non-blocking stream_select() across all registered
@@ -206,7 +206,7 @@ final class AsyncIO
      * read/write watchers inherited from the parent process. Stream
      * resources and their associated Fibers are meaningless in the
      * child's address space and would cause hasPending() to return
-     * true indefinitely, preventing Thread::wait() from terminating.
+     * true indefinitely, preventing Thread::await() from terminating.
      */
     public static function resetState(): void
     {

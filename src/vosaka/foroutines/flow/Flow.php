@@ -285,7 +285,7 @@ final class Flow extends BaseFlow
      *                  while the collector is given a chance to drain buffered
      *                  values. This is cooperative — it requires the collector
      *                  to run in a context where the scheduler can round-robin
-     *                  (e.g. inside Launch/Thread::wait).
+     *                  (e.g. inside Launch/Thread::await).
      *
      *   - DROP_OLDEST: The oldest value in the buffer is evicted and the new
      *                  value is appended. The source fiber never blocks.

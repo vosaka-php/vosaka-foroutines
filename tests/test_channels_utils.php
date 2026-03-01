@@ -19,7 +19,7 @@
  *   - Channel iteration via getIterator (on closed channels)
  *
  * Note: Channels::range(), merge(), map(), filter(), take(), zip(), timer()
- * all use Launch::new() internally and require a RunBlocking + Thread::wait()
+ * all use Launch::new() internally and require a RunBlocking + Thread::await()
  * context to function. Those are tested indirectly via the dispatcher and
  * structured concurrency tests. This file focuses on synchronous channel ops.
  *

@@ -116,7 +116,7 @@ main(function () {
                 $sum += $value;
             });
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Cold Flow (emit + collect):", $flowMs);
@@ -171,7 +171,7 @@ main(function () {
                 $sum += $value;
             });
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Cold Flow (transform+collect):", $flowMs);
@@ -218,7 +218,7 @@ main(function () {
                 $sum += $value;
             });
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Unbuffered collect:", $unbufferedMs);
@@ -237,7 +237,7 @@ main(function () {
                 $sum += $value;
             });
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Buffered collect (buf=32):", $bufferedMs);
@@ -322,9 +322,9 @@ main(function () {
                 $flow->complete();
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("SharedFlow (SUSPEND, buf=64):", $sharedMs);
@@ -393,10 +393,10 @@ main(function () {
                 });
             });
 
-            Thread::wait();
+            Thread::await();
             $flow->complete();
         });
-        Thread::wait();
+        Thread::await();
         return $replayed;
     });
     BenchHelper::timing("SharedFlow replay collect:", $replayMs);
@@ -466,9 +466,9 @@ main(function () {
                 $flow->complete();
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $received;
     });
     BenchHelper::timing("SUSPEND backpressure:", $suspendMs);
@@ -528,9 +528,9 @@ main(function () {
                     $flow->complete();
                 });
 
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
             return $received;
         },
     );
@@ -596,9 +596,9 @@ main(function () {
                     $flow->complete();
                 });
 
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
             return $received;
         },
     );
@@ -704,9 +704,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $lastSeen;
     });
     BenchHelper::timing("MutableStateFlow updates:", $stateMs);
@@ -780,9 +780,9 @@ main(function () {
                 }
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $lastSeen;
     });
     BenchHelper::timing("StateFlow {$observerCount} observers:", $multiMs);
@@ -852,9 +852,9 @@ main(function () {
                 $flow->complete();
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $received;
     });
     BenchHelper::timing("extraBuffer={$smallBuf}:", $smallBufMs);
@@ -890,9 +890,9 @@ main(function () {
                 $flow->complete();
             });
 
-            Thread::wait();
+            Thread::await();
         });
-        Thread::wait();
+        Thread::await();
         return $received;
     });
     BenchHelper::timing("extraBuffer={$largeBuf}:", $largeBufMs);
@@ -958,7 +958,7 @@ main(function () {
                 $sum += $value;
             });
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Cold Flow:", $flowMs);
@@ -1046,9 +1046,9 @@ main(function () {
                     $flow->complete();
                 });
 
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
             return $received;
         });
 
@@ -1136,9 +1136,9 @@ main(function () {
                     $flow->complete();
                 });
 
-                Thread::wait();
+                Thread::await();
             });
-            Thread::wait();
+            Thread::await();
         });
 
         $perMsg = ($ms / $msgCount) * 1000.0;
@@ -1179,7 +1179,7 @@ main(function () {
                 $sum += $value;
             });
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Flow::fromArray:", $fromArrayMs);
@@ -1197,7 +1197,7 @@ main(function () {
                 $sum += $value;
             });
         });
-        Thread::wait();
+        Thread::await();
         return $sum;
     });
     BenchHelper::timing("Flow::new (manual emit):", $manualMs);
