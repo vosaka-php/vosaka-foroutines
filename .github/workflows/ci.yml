@@ -78,9 +78,9 @@ jobs:
               working-directory: tests
               run: php test_error_handling.php
 
-            - name: Run async wait tests
+            - name: Run async await tests
               working-directory: tests
-              run: php test_async_wait.php
+              run: php test_async_await.php
 
             - name: Run select tests
               working-directory: tests
