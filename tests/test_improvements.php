@@ -283,7 +283,7 @@ main(function () {
             $content = null;
 
             Launch::new(function () use (&$content, $testFile) {
-                $content = AsyncIO::fileGetContents($testFile);
+                $content = AsyncIO::fileGetContents($testFile)->await();
             });
 
             Thread::await();
@@ -311,7 +311,7 @@ main(function () {
             $written = 0;
 
             Launch::new(function () use (&$written, $testFile, $data) {
-                $written = AsyncIO::filePutContents($testFile, $data);
+                $written = AsyncIO::filePutContents($testFile, $data)->await();
             });
 
             Thread::await();
@@ -345,7 +345,7 @@ main(function () {
                 try {
                     AsyncIO::fileGetContents(
                         "/nonexistent/path/file_" . mt_rand() . ".txt",
-                    );
+                    )->await();
                 } catch (\RuntimeException $e) {
                     $thrown = true;
                 }
@@ -371,11 +371,11 @@ main(function () {
             $r2 = null;
 
             Launch::new(function () use (&$r1, $file1) {
-                $r1 = AsyncIO::fileGetContents($file1);
+                $r1 = AsyncIO::fileGetContents($file1)->await();
             });
 
             Launch::new(function () use (&$r2, $file2) {
-                $r2 = AsyncIO::fileGetContents($file2);
+                $r2 = AsyncIO::fileGetContents($file2)->await();
             });
 
             Thread::await();
@@ -411,7 +411,7 @@ main(function () {
                     $testFile,
                     "_second",
                     FILE_APPEND,
-                );
+                )->await();
             });
 
             Thread::await();
@@ -432,7 +432,7 @@ main(function () {
             $ip = null;
 
             Launch::new(function () use (&$ip) {
-                $ip = AsyncIO::dnsResolve("localhost");
+                $ip = AsyncIO::dnsResolve("localhost")->await();
             });
 
             Thread::await();
@@ -450,7 +450,7 @@ main(function () {
             $ip = null;
 
             Launch::new(function () use (&$ip) {
-                $ip = AsyncIO::dnsResolve("127.0.0.1");
+                $ip = AsyncIO::dnsResolve("127.0.0.1")->await();
             });
 
             Thread::await();
@@ -466,7 +466,7 @@ main(function () {
     test(
         "AsyncIO::createSocketPair creates connected socket pair",
         function () {
-            $pair = AsyncIO::createSocketPair();
+            $pair = AsyncIO::createSocketPair()->await();
 
             assert_true(
                 is_resource($pair[0]),
@@ -499,7 +499,7 @@ main(function () {
                 $tmpFile =
                     sys_get_temp_dir() . "/asyncio_sched_" . time() . ".txt";
                 file_put_contents($tmpFile, "scheduler-test");
-                $content = AsyncIO::fileGetContents($tmpFile);
+                $content = AsyncIO::fileGetContents($tmpFile)->await();
                 $results[] = "file:" . strlen($content);
                 @unlink($tmpFile);
             });

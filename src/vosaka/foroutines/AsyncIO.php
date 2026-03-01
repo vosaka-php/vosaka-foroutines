@@ -26,13 +26,15 @@ use InvalidArgumentException;
  *   - Fibers call the static helper methods (read, write, connect, etc.)
  *     which register a watcher and Fiber::suspend() until the stream is ready
  *
- * Usage from within a Fiber (e.g. inside Launch::new or Async::new):
+ * All public I/O methods return an AsyncIOOperation instance. The actual
+ * work is deferred until the caller invokes ->await(), making the async
+ * nature of the code explicit and consistent:
  *
- *     $body = AsyncIO::httpGet('https://example.com/api');
- *     $data = AsyncIO::fileGetContents('/path/to/file');
- *     $socket = AsyncIO::tcpConnect('example.com', 80);
- *     AsyncIO::streamWrite($socket, "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n");
- *     $response = AsyncIO::streamRead($socket);
+ *     $body = AsyncIO::httpGet('https://example.com/api')->await();
+ *     $data = AsyncIO::fileGetContents('/path/to/file')->await();
+ *     $socket = AsyncIO::tcpConnect('example.com', 80)->await();
+ *     AsyncIO::streamWrite($socket, "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n")->await();
+ *     $response = AsyncIO::streamRead($socket)->await();
  */
 final class AsyncIO
 {
@@ -289,7 +291,7 @@ final class AsyncIO
         return (bool) Fiber::suspend();
     }
 
-    // ─── High-level async I/O primitives ─────────────────────────────
+    // ─── High-level async I/O primitives (return AsyncIOOperation) ───
 
     /**
      * Open a non-blocking TCP connection to a host:port.
@@ -300,13 +302,264 @@ final class AsyncIO
      * @param string $host Hostname or IP address.
      * @param int $port Port number.
      * @param float $timeoutSeconds Connection timeout in seconds.
-     * @return resource The connected socket stream.
-     * @throws RuntimeException On connection failure or timeout.
+     * @return AsyncIOOperation Resolves to the connected socket stream resource.
      */
     public static function tcpConnect(
         string $host,
         int $port,
         float $timeoutSeconds = self::CONNECT_TIMEOUT_S,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $host,
+            $port,
+            $timeoutSeconds,
+        ) {
+            return self::doTcpConnect($host, $port, $timeoutSeconds);
+        });
+    }
+
+    /**
+     * Asynchronously connect via TLS/SSL.
+     *
+     * @param string $host Hostname.
+     * @param int $port Port number (default 443).
+     * @param float $timeoutSeconds Connection timeout.
+     * @return AsyncIOOperation Resolves to the connected TLS socket stream resource.
+     */
+    public static function tlsConnect(
+        string $host,
+        int $port = 443,
+        float $timeoutSeconds = self::CONNECT_TIMEOUT_S,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $host,
+            $port,
+            $timeoutSeconds,
+        ) {
+            return self::doTlsConnect($host, $port, $timeoutSeconds);
+        });
+    }
+
+    /**
+     * Non-blocking read from a stream.
+     *
+     * Suspends the current Fiber until data is available, then reads up to
+     * $maxBytes bytes. Returns empty string on EOF.
+     *
+     * @param resource $stream The stream to read from.
+     * @param int $maxBytes Maximum bytes to read per call.
+     * @param float $timeoutSeconds Read timeout.
+     * @return AsyncIOOperation Resolves to the data read, or empty string on EOF.
+     */
+    public static function streamRead(
+        $stream,
+        int $maxBytes = self::READ_CHUNK_SIZE,
+        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $stream,
+            $maxBytes,
+            $timeoutSeconds,
+        ): string {
+            return self::doStreamRead($stream, $maxBytes, $timeoutSeconds);
+        });
+    }
+
+    /**
+     * Read ALL available data from a stream until EOF.
+     *
+     * @param resource $stream The stream to read from.
+     * @param float $timeoutSeconds Total read timeout.
+     * @return AsyncIOOperation Resolves to the complete data string.
+     */
+    public static function streamReadAll(
+        $stream,
+        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $stream,
+            $timeoutSeconds,
+        ): string {
+            return self::doStreamReadAll($stream, $timeoutSeconds);
+        });
+    }
+
+    /**
+     * Non-blocking write to a stream.
+     *
+     * Writes the entire $data buffer, suspending the Fiber as needed when
+     * the stream's write buffer is full.
+     *
+     * @param resource $stream The stream to write to.
+     * @param string $data The data to write.
+     * @param float $timeoutSeconds Write timeout.
+     * @return AsyncIOOperation Resolves to total bytes written (int).
+     */
+    public static function streamWrite(
+        $stream,
+        string $data,
+        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $stream,
+            $data,
+            $timeoutSeconds,
+        ): int {
+            return self::doStreamWrite($stream, $data, $timeoutSeconds);
+        });
+    }
+
+    /**
+     * Perform a non-blocking HTTP GET request.
+     *
+     * This is the async equivalent of file_get_contents() for HTTP URLs.
+     * The Fiber suspends during network I/O, allowing other fibers to run.
+     *
+     * Supports both http:// and https:// URLs.
+     *
+     * @param string $url Full URL (http:// or https://).
+     * @param array<string, string> $headers Additional request headers (key => value).
+     * @param float $timeoutSeconds Total request timeout.
+     * @return AsyncIOOperation Resolves to the response body string.
+     */
+    public static function httpGet(
+        string $url,
+        array $headers = [],
+        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $url,
+            $headers,
+            $timeoutSeconds,
+        ): string {
+            return self::doHttpGet($url, $headers, $timeoutSeconds);
+        });
+    }
+
+    /**
+     * Perform a non-blocking HTTP POST request.
+     *
+     * @param string $url Full URL.
+     * @param string $body Request body.
+     * @param array<string, string> $headers Additional headers.
+     * @param string $contentType Content-Type header value.
+     * @param float $timeoutSeconds Total request timeout.
+     * @return AsyncIOOperation Resolves to the response body string.
+     */
+    public static function httpPost(
+        string $url,
+        string $body,
+        array $headers = [],
+        string $contentType = "application/json",
+        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $url,
+            $body,
+            $headers,
+            $contentType,
+            $timeoutSeconds,
+        ): string {
+            return self::doHttpPost(
+                $url,
+                $body,
+                $headers,
+                $contentType,
+                $timeoutSeconds,
+            );
+        });
+    }
+
+    /**
+     * Non-blocking file read.
+     *
+     * Opens the file in non-blocking mode and reads its entire contents
+     * while cooperatively yielding to other fibers.
+     *
+     * Note: On many OSes, regular file I/O is always "ready" in
+     * stream_select(), but this still benefits from the cooperative
+     * yielding pattern for very large files and keeps the API consistent.
+     *
+     * @param string $filePath Path to the file.
+     * @return AsyncIOOperation Resolves to the file contents string.
+     */
+    public static function fileGetContents(string $filePath): AsyncIOOperation
+    {
+        return new AsyncIOOperation(static function () use ($filePath): string {
+            return self::doFileGetContents($filePath);
+        });
+    }
+
+    /**
+     * Non-blocking file write.
+     *
+     * @param string $filePath Path to the file.
+     * @param string $data Data to write.
+     * @param int $flags Same as file_put_contents flags (FILE_APPEND, LOCK_EX, etc.)
+     * @return AsyncIOOperation Resolves to bytes written (int).
+     */
+    public static function filePutContents(
+        string $filePath,
+        string $data,
+        int $flags = 0,
+    ): AsyncIOOperation {
+        return new AsyncIOOperation(static function () use (
+            $filePath,
+            $data,
+            $flags,
+        ): int {
+            return self::doFilePutContents($filePath, $data, $flags);
+        });
+    }
+
+    /**
+     * Async-friendly DNS resolution.
+     *
+     * PHP's gethostbyname() is blocking. This wraps it in a Fiber-aware
+     * pattern: it yields once before the (potentially slow) DNS lookup
+     * so that other fibers get a chance to run, then performs the lookup.
+     *
+     * For truly non-blocking DNS, consider using Dispatchers::IO to offload
+     * the lookup to a child process.
+     *
+     * @param string $hostname The hostname to resolve.
+     * @return AsyncIOOperation Resolves to the resolved IP address string.
+     */
+    public static function dnsResolve(string $hostname): AsyncIOOperation
+    {
+        return new AsyncIOOperation(static function () use ($hostname): string {
+            return self::doDnsResolve($hostname);
+        });
+    }
+
+    /**
+     * Create a pair of connected non-blocking stream sockets.
+     *
+     * Useful for in-process fiber-to-fiber communication via streams,
+     * e.g. piping data between a producer and consumer fiber.
+     *
+     * @return AsyncIOOperation Resolves to array{0: resource, 1: resource} [readable, writable] socket pair.
+     */
+    public static function createSocketPair(): AsyncIOOperation
+    {
+        return new AsyncIOOperation(static function (): array {
+            return self::doCreateSocketPair();
+        });
+    }
+
+    // ─── Internal implementations ────────────────────────────────────
+
+    /**
+     * @param string $host
+     * @param int $port
+     * @param float $timeoutSeconds
+     * @return resource
+     * @throws RuntimeException
+     */
+    private static function doTcpConnect(
+        string $host,
+        int $port,
+        float $timeoutSeconds,
     ) {
         $address = "tcp://{$host}:{$port}";
 
@@ -355,18 +608,16 @@ final class AsyncIO
     }
 
     /**
-     * Asynchronously connect via TLS/SSL.
-     *
-     * @param string $host Hostname.
-     * @param int $port Port number (default 443).
-     * @param float $timeoutSeconds Connection timeout.
-     * @return resource The connected TLS socket stream.
-     * @throws RuntimeException On connection failure.
+     * @param string $host
+     * @param int $port
+     * @param float $timeoutSeconds
+     * @return resource
+     * @throws RuntimeException
      */
-    public static function tlsConnect(
+    private static function doTlsConnect(
         string $host,
-        int $port = 443,
-        float $timeoutSeconds = self::CONNECT_TIMEOUT_S,
+        int $port,
+        float $timeoutSeconds,
     ) {
         $address = "tls://{$host}:{$port}";
 
@@ -400,21 +651,16 @@ final class AsyncIO
     }
 
     /**
-     * Non-blocking read from a stream.
-     *
-     * Suspends the current Fiber until data is available, then reads up to
-     * $maxBytes bytes. Returns empty string on EOF.
-     *
-     * @param resource $stream The stream to read from.
-     * @param int $maxBytes Maximum bytes to read per call.
-     * @param float $timeoutSeconds Read timeout.
-     * @return string The data read, or empty string on EOF.
-     * @throws RuntimeException On read failure or timeout.
+     * @param resource $stream
+     * @param int $maxBytes
+     * @param float $timeoutSeconds
+     * @return string
+     * @throws RuntimeException|InvalidArgumentException
      */
-    public static function streamRead(
+    private static function doStreamRead(
         $stream,
-        int $maxBytes = self::READ_CHUNK_SIZE,
-        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+        int $maxBytes,
+        float $timeoutSeconds,
     ): string {
         if (!is_resource($stream)) {
             throw new InvalidArgumentException(
@@ -453,22 +699,20 @@ final class AsyncIO
     }
 
     /**
-     * Read ALL available data from a stream until EOF.
-     *
-     * @param resource $stream The stream to read from.
-     * @param float $timeoutSeconds Total read timeout.
-     * @return string The complete data.
-     * @throws RuntimeException On timeout.
+     * @param resource $stream
+     * @param float $timeoutSeconds
+     * @return string
+     * @throws RuntimeException
      */
-    public static function streamReadAll(
+    private static function doStreamReadAll(
         $stream,
-        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+        float $timeoutSeconds,
     ): string {
         $buffer = "";
         $start = microtime(true);
 
         while (true) {
-            $chunk = self::streamRead(
+            $chunk = self::doStreamRead(
                 $stream,
                 self::READ_CHUNK_SIZE,
                 $timeoutSeconds - (microtime(true) - $start),
@@ -493,21 +737,16 @@ final class AsyncIO
     }
 
     /**
-     * Non-blocking write to a stream.
-     *
-     * Writes the entire $data buffer, suspending the Fiber as needed when
-     * the stream's write buffer is full.
-     *
-     * @param resource $stream The stream to write to.
-     * @param string $data The data to write.
-     * @param float $timeoutSeconds Write timeout.
-     * @return int Total bytes written.
-     * @throws RuntimeException On write failure or timeout.
+     * @param resource $stream
+     * @param string $data
+     * @param float $timeoutSeconds
+     * @return int
+     * @throws RuntimeException|InvalidArgumentException
      */
-    public static function streamWrite(
+    private static function doStreamWrite(
         $stream,
         string $data,
-        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+        float $timeoutSeconds,
     ): int {
         if (!is_resource($stream)) {
             throw new InvalidArgumentException(
@@ -554,27 +793,17 @@ final class AsyncIO
         return $written;
     }
 
-    // ─── Convenience: async HTTP GET ─────────────────────────────────
-
     /**
-     * Perform a non-blocking HTTP GET request.
-     *
-     * This is the async equivalent of file_get_contents() for HTTP URLs.
-     * The Fiber suspends during network I/O, allowing other fibers to run.
-     *
-     * Supports both http:// and https:// URLs.
-     *
-     * @param string $url Full URL (http:// or https://).
-     * @param array<string, string> $headers Additional request headers (key => value).
-     * @param float $timeoutSeconds Total request timeout.
-     * @return string The response body.
-     * @throws RuntimeException On connection or HTTP errors.
-     * @throws InvalidArgumentException On malformed URL.
+     * @param string $url
+     * @param array<string, string> $headers
+     * @param float $timeoutSeconds
+     * @return string
+     * @throws RuntimeException|InvalidArgumentException
      */
-    public static function httpGet(
+    private static function doHttpGet(
         string $url,
-        array $headers = [],
-        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+        array $headers,
+        float $timeoutSeconds,
     ): string {
         $parsed = parse_url($url);
         if ($parsed === false || !isset($parsed["host"])) {
@@ -591,9 +820,9 @@ final class AsyncIO
 
         // Connect
         if ($scheme === "https") {
-            $socket = self::tlsConnect($host, $port, $timeoutSeconds);
+            $socket = self::doTlsConnect($host, $port, $timeoutSeconds);
         } else {
-            $socket = self::tcpConnect($host, $port, $timeoutSeconds);
+            $socket = self::doTcpConnect($host, $port, $timeoutSeconds);
         }
 
         // Build request
@@ -609,11 +838,10 @@ final class AsyncIO
         $request .= "\r\n";
 
         // Send
-        $remainingTimeout = $timeoutSeconds - microtime(true);
-        self::streamWrite($socket, $request, max(1.0, $timeoutSeconds / 2));
+        self::doStreamWrite($socket, $request, max(1.0, $timeoutSeconds / 2));
 
         // Read full response
-        $response = self::streamReadAll($socket, $timeoutSeconds);
+        $response = self::doStreamReadAll($socket, $timeoutSeconds);
         fclose($socket);
 
         // Split headers from body
@@ -634,22 +862,20 @@ final class AsyncIO
     }
 
     /**
-     * Perform a non-blocking HTTP POST request.
-     *
-     * @param string $url Full URL.
-     * @param string $body Request body.
-     * @param array<string, string> $headers Additional headers.
-     * @param string $contentType Content-Type header value.
-     * @param float $timeoutSeconds Total request timeout.
-     * @return string The response body.
-     * @throws RuntimeException On errors.
+     * @param string $url
+     * @param string $body
+     * @param array<string, string> $headers
+     * @param string $contentType
+     * @param float $timeoutSeconds
+     * @return string
+     * @throws RuntimeException|InvalidArgumentException
      */
-    public static function httpPost(
+    private static function doHttpPost(
         string $url,
         string $body,
-        array $headers = [],
-        string $contentType = "application/json",
-        float $timeoutSeconds = self::STREAM_TIMEOUT_S,
+        array $headers,
+        string $contentType,
+        float $timeoutSeconds,
     ): string {
         $parsed = parse_url($url);
         if ($parsed === false || !isset($parsed["host"])) {
@@ -665,9 +891,9 @@ final class AsyncIO
         }
 
         if ($scheme === "https") {
-            $socket = self::tlsConnect($host, $port, $timeoutSeconds);
+            $socket = self::doTlsConnect($host, $port, $timeoutSeconds);
         } else {
-            $socket = self::tcpConnect($host, $port, $timeoutSeconds);
+            $socket = self::doTcpConnect($host, $port, $timeoutSeconds);
         }
 
         $request = "POST {$path} HTTP/1.1\r\n";
@@ -684,8 +910,8 @@ final class AsyncIO
         $request .= "\r\n";
         $request .= $body;
 
-        self::streamWrite($socket, $request, max(1.0, $timeoutSeconds / 2));
-        $response = self::streamReadAll($socket, $timeoutSeconds);
+        self::doStreamWrite($socket, $request, max(1.0, $timeoutSeconds / 2));
+        $response = self::doStreamReadAll($socket, $timeoutSeconds);
         fclose($socket);
 
         $headerEnd = strpos($response, "\r\n\r\n");
@@ -703,23 +929,12 @@ final class AsyncIO
         return $responseBody;
     }
 
-    // ─── Convenience: async file I/O ─────────────────────────────────
-
     /**
-     * Non-blocking file read.
-     *
-     * Opens the file in non-blocking mode and reads its entire contents
-     * while cooperatively yielding to other fibers.
-     *
-     * Note: On many OSes, regular file I/O is always "ready" in
-     * stream_select(), but this still benefits from the cooperative
-     * yielding pattern for very large files and keeps the API consistent.
-     *
-     * @param string $filePath Path to the file.
-     * @return string The file contents.
-     * @throws RuntimeException If the file cannot be opened.
+     * @param string $filePath
+     * @return string
+     * @throws RuntimeException
      */
-    public static function fileGetContents(string $filePath): string
+    private static function doFileGetContents(string $filePath): string
     {
         $stream = @fopen($filePath, "rb");
         if ($stream === false) {
@@ -747,18 +962,16 @@ final class AsyncIO
     }
 
     /**
-     * Non-blocking file write.
-     *
-     * @param string $filePath Path to the file.
-     * @param string $data Data to write.
-     * @param int $flags Same as file_put_contents flags (FILE_APPEND, LOCK_EX, etc.)
-     * @return int Bytes written.
-     * @throws RuntimeException If the file cannot be opened.
+     * @param string $filePath
+     * @param string $data
+     * @param int $flags
+     * @return int
+     * @throws RuntimeException
      */
-    public static function filePutContents(
+    private static function doFilePutContents(
         string $filePath,
         string $data,
-        int $flags = 0,
+        int $flags,
     ): int {
         $mode = $flags & FILE_APPEND ? "ab" : "wb";
 
@@ -801,23 +1014,12 @@ final class AsyncIO
         return $written;
     }
 
-    // ─── Convenience: async DNS resolution ───────────────────────────
-
     /**
-     * Async-friendly DNS resolution.
-     *
-     * PHP's gethostbyname() is blocking. This wraps it in a Fiber-aware
-     * pattern: it yields once before the (potentially slow) DNS lookup
-     * so that other fibers get a chance to run, then performs the lookup.
-     *
-     * For truly non-blocking DNS, consider using Dispatchers::IO to offload
-     * the lookup to a child process.
-     *
-     * @param string $hostname The hostname to resolve.
-     * @return string The resolved IP address.
-     * @throws RuntimeException If resolution fails.
+     * @param string $hostname
+     * @return string
+     * @throws RuntimeException
      */
-    public static function dnsResolve(string $hostname): string
+    private static function doDnsResolve(string $hostname): string
     {
         // If it's already an IP, return immediately
         if (filter_var($hostname, FILTER_VALIDATE_IP)) {
@@ -886,19 +1088,14 @@ final class AsyncIO
     }
 
     /**
-     * Create a pair of connected non-blocking stream sockets.
-     *
-     * Useful for in-process fiber-to-fiber communication via streams,
-     * e.g. piping data between a producer and consumer fiber.
-     *
-     * @return array{0: resource, 1: resource} [readable, writable] socket pair.
-     * @throws RuntimeException If socket pair creation fails.
+     * @return array{0: resource, 1: resource}
+     * @throws RuntimeException
      */
-    public static function createSocketPair(): array
+    private static function doCreateSocketPair(): array
     {
         if (strtoupper(substr(PHP_OS, 0, 3)) === "WIN") {
             // Windows: use a loopback TCP pair
-            return self::createWindowsSocketPair();
+            return self::doCreateWindowsSocketPair();
         }
 
         // Unix: use stream_socket_pair
@@ -924,7 +1121,7 @@ final class AsyncIO
      * @return array{0: resource, 1: resource}
      * @throws RuntimeException On failure.
      */
-    private static function createWindowsSocketPair(): array
+    private static function doCreateWindowsSocketPair(): array
     {
         $server = @stream_socket_server("tcp://127.0.0.1:0", $errno, $errstr);
 

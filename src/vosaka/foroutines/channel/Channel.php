@@ -11,8 +11,8 @@ use ReflectionProperty;
 use ReflectionMethod;
 use JsonSerializable;
 use Serializable;
-use vosaka\foroutines\sync\Mutex;
 use IteratorAggregate;
+use vosaka\foroutines\sync\Mutex;
 
 final class Channel implements IteratorAggregate
 {
