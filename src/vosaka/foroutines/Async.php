@@ -6,7 +6,6 @@ namespace vosaka\foroutines;
 
 use Fiber;
 use Generator;
-use venndev\vosaka\core\Result;
 
 /**
  * Class Async
@@ -21,12 +20,12 @@ final class Async
     /**
      * Creates a new asynchronous task.
      *
-     * @param callable|Generator|Result $callable The function or generator to run asynchronously.
+     * @param callable|Generator $callable The function or generator to run asynchronously.
      * @param Dispatchers $dispatcher The dispatcher to use for the async task.
      * @return Async
      */
     public static function new(
-        callable|Generator|Result $callable,
+        callable|Generator $callable,
         Dispatchers $dispatcher = Dispatchers::DEFAULT,
     ): Async {
         if ($dispatcher === Dispatchers::IO) {

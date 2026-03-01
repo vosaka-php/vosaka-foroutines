@@ -8,12 +8,11 @@ use Closure;
 use Fiber;
 use Generator;
 use Laravel\SerializableClosure\SerializableClosure;
-use venndev\vosaka\core\Result;
 
 final class CallableUtils
 {
     public static function makeCallable(
-        callable|Generator|Async|Result|Fiber $callable,
+        callable|Generator|Async|Fiber $callable,
     ): callable {
         if ($callable instanceof Fiber) {
             return self::fiberToCallable($callable);
@@ -21,10 +20,6 @@ final class CallableUtils
 
         if ($callable instanceof Async) {
             return self::fiberToCallable($callable->fiber);
-        }
-
-        if ($callable instanceof Result) {
-            return self::generatorToCallable($callable->unwrap());
         }
 
         if ($callable instanceof Generator) {

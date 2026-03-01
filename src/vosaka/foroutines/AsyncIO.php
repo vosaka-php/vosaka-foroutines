@@ -7,7 +7,6 @@ namespace vosaka\foroutines;
 use Fiber;
 use RuntimeException;
 use InvalidArgumentException;
-use Exception;
 
 /**
  * AsyncIO — Non-blocking stream I/O via stream_select() for true async I/O

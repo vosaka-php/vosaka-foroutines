@@ -6,9 +6,7 @@ namespace vosaka\foroutines;
 
 use Closure;
 use Exception;
-use Fiber;
 use Generator;
-use Laravel\SerializableClosure\SerializableClosure;
 
 /**
  * ForkProcess — Low-overhead child process execution via pcntl_fork().

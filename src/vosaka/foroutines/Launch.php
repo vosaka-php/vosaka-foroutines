@@ -8,7 +8,6 @@ use Fiber;
 use Generator;
 use Throwable;
 use SplQueue;
-use venndev\vosaka\core\Result;
 
 /**
  * Launches a new asynchronous task that runs concurrently with the main thread.
@@ -63,12 +62,12 @@ final class Launch extends Job
     /**
      * Creates a new asynchronous task. It runs concurrently with the main thread.
      *
-     * @param callable|Generator|Async|Result|Fiber $callable The function or generator to run asynchronously.
+     * @param callable|Generator|Async|Fiber $callable The function or generator to run asynchronously.
      * @param Dispatchers $dispatcher The dispatcher to use for the async task.
      * @return Launch
      */
     public static function new(
-        callable|Generator|Async|Result|Fiber $callable,
+        callable|Generator|Async|Fiber $callable,
         Dispatchers $dispatcher = Dispatchers::DEFAULT,
     ): Launch {
         if ($dispatcher === Dispatchers::IO) {
@@ -91,7 +90,7 @@ final class Launch extends Job
     }
 
     private static function makeLaunch(
-        callable|Generator|Async|Result|Fiber $callable,
+        callable|Generator|Async|Fiber $callable,
     ): Launch {
         $fiber = FiberUtils::makeFiber($callable);
         $id = spl_object_id($fiber);

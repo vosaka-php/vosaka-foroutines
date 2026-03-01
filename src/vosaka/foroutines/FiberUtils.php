@@ -12,7 +12,6 @@ use ReflectionFunction;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionUnionType;
-use venndev\vosaka\core\Result;
 
 final class FiberUtils
 {
@@ -24,16 +23,16 @@ final class FiberUtils
     /**
      * Creates a new Fiber instance from the provided callable, generator, Async, Result, or existing Fiber.
      *
-     * @param callable|Generator|Async|Result|Fiber $callable The function or generator to run in the fiber.
+     * @param callable|Generator|Async|Fiber $callable The function or generator to run in the fiber.
      * @return Fiber
      */
-    public static function makeFiber(callable|Generator|Async|Result|Fiber $callable): Fiber
-    {
-        if ($callable instanceof Result) {
-            $callable = $callable->unwrap();
-        }
-
-        if (is_callable($callable) && self::isFiberCallbackGenerator($callable)) {
+    public static function makeFiber(
+        callable|Generator|Async|Fiber $callable,
+    ): Fiber {
+        if (
+            is_callable($callable) &&
+            self::isFiberCallbackGenerator($callable)
+        ) {
             $callable = $callable();
         }
 
@@ -64,17 +63,17 @@ final class FiberUtils
             } elseif ($callback instanceof Closure) {
                 $reflection = new ReflectionFunction($callback);
             } else {
-                $reflection = new ReflectionMethod($callback, '__invoke');
+                $reflection = new ReflectionMethod($callback, "__invoke");
             }
 
             $returnType = $reflection->getReturnType();
             if ($returnType instanceof ReflectionNamedType) {
-                return $returnType->getName() === 'Generator';
+                return $returnType->getName() === "Generator";
             }
 
             if ($returnType instanceof ReflectionUnionType) {
                 foreach ($returnType->getTypes() as $type) {
-                    if ($type->getName() === 'Generator') {
+                    if ($type->getName() === "Generator") {
                         return true;
                     }
                 }

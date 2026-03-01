@@ -6,7 +6,6 @@ namespace vosaka\foroutines;
 
 use Fiber;
 use Generator;
-use venndev\vosaka\core\Result;
 
 /**
  * RunBlocking is a utility class that allows you to run multiple fibers synchronously
@@ -40,12 +39,12 @@ final class RunBlocking
      * subsystems had actionable work) to prevent burning 100% CPU in a
      * tight busy-wait spin loop.
      *
-     * @param callable|Generator|Async|Result|Fiber $callable The fiber(s) to run.
+     * @param callable|Generator|Async|Fiber $callable The fiber(s) to run.
      * @param Dispatchers $dispatchers The dispatcher context.
      * @return void
      */
     public static function new(
-        callable|Generator|Async|Result|Fiber $callable,
+        callable|Generator|Async|Fiber $callable,
         Dispatchers $dispatchers = Dispatchers::DEFAULT,
     ): void {
         if ($dispatchers === Dispatchers::IO) {
