@@ -11,7 +11,6 @@ use ReflectionProperty;
 use ReflectionMethod;
 use JsonSerializable;
 use Serializable;
-use vosaka\foroutines\Pause;
 use vosaka\foroutines\sync\Mutex;
 use IteratorAggregate;
 
@@ -33,6 +32,20 @@ final class Channel implements IteratorAggregate
     private string $tempDir;
     private ?string $channelFile = null;
 
+    /**
+     * Whether this Channel instance is the owner (creator) of the
+     * underlying inter-process storage (file / shared-memory segment).
+     *
+     * Only the owner is allowed to delete the backing file on cleanup /
+     * destruct / shutdown.  Connectors (child processes that call
+     * Channel::connect()) merely detach — they never remove the file.
+     *
+     * This fixes the bug where a Dispatchers::IO child process would
+     * destruct its Channel object on exit and accidentally delete the
+     * backing file before the parent (or another child) could read it.
+     */
+    private bool $isOwner = false;
+
     // Serialization options
     private string $serializer;
     private bool $preserveObjectTypes;
@@ -49,6 +62,7 @@ final class Channel implements IteratorAggregate
         string $serializer = self::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
         bool $preserveObjectTypes = true,
+        bool $isOwner = false,
     ) {
         if ($capacity < 0) {
             throw new Exception("Channel capacity cannot be negative");
@@ -59,6 +73,7 @@ final class Channel implements IteratorAggregate
         $this->serializer = $serializer;
         $this->preserveObjectTypes = $preserveObjectTypes;
         $this->tempDir = $tempDir ?: sys_get_temp_dir();
+        $this->isOwner = $isOwner;
 
         if ($this->interProcess) {
             $this->channelName = $channelName ?: "channel_" . uniqid();
@@ -106,15 +121,34 @@ final class Channel implements IteratorAggregate
             $this->initSharedMemory();
         }
 
-        // Initialize channel state
+        // Initialize channel state.
+        // If this is the owner and the backing file does not yet exist,
+        // persist the initial (empty) state so that Channel::connect()
+        // in child processes can find the file immediately.
+        if (
+            $this->isOwner &&
+            $this->channelFile &&
+            !file_exists($this->channelFile)
+        ) {
+            $this->saveChannelState();
+        }
         $this->loadChannelState();
 
-        // Register cleanup
-        register_shutdown_function([$this, "cleanup"]);
+        // Only the owner process registers automatic cleanup on shutdown.
+        // Connectors (child processes) must NOT delete the backing file.
+        if ($this->isOwner) {
+            register_shutdown_function([$this, "cleanup"]);
+        }
     }
 
     /**
-     * Connect to existing inter-process channel
+     * Connect to an existing inter-process channel.
+     *
+     * The returned Channel is a **connector** (isOwner = false) — it will
+     * never delete the backing file on destruct / shutdown.  Only the
+     * process that originally created the channel via newInterProcess()
+     * (or Channels::createInterProcess()) is the owner and is allowed
+     * to remove the file.
      */
     public static function connect(
         string $channelName,
@@ -134,6 +168,7 @@ final class Channel implements IteratorAggregate
             throw new Exception("Channel '{$channelName}' does not exist");
         }
 
+        // isOwner = false → connector never deletes the backing file
         $channel = new self(
             0,
             true,
@@ -141,6 +176,7 @@ final class Channel implements IteratorAggregate
             $serializer,
             $tempDir,
             $preserveObjectTypes,
+            false,
         );
         return $channel;
     }
@@ -200,7 +236,10 @@ final class Channel implements IteratorAggregate
     }
 
     /**
-     * Load channel state from persistent storage
+     * Load channel state from persistent storage (with mutex).
+     *
+     * Call this from code that is NOT already inside a
+     * bufferMutex->synchronized() block.
      */
     private function loadChannelState(): void
     {
@@ -209,13 +248,24 @@ final class Channel implements IteratorAggregate
         }
 
         $this->bufferMutex->synchronized(function () {
-            $state = $this->readChannelState();
-            if ($state) {
-                $this->buffer = $state["buffer"] ?? [];
-                $this->closed = $state["closed"] ?? false;
-                $this->capacity = $state["capacity"] ?? $this->capacity;
-            }
+            $this->loadChannelStateRaw();
         });
+    }
+
+    /**
+     * Load channel state from persistent storage WITHOUT acquiring
+     * the mutex.  Call this only from code that is already running
+     * inside a bufferMutex->synchronized() block to avoid a nested-
+     * lock deadlock (file locks on Windows are not re-entrant).
+     */
+    private function loadChannelStateRaw(): void
+    {
+        $state = $this->readChannelState();
+        if ($state) {
+            $this->buffer = $state["buffer"] ?? [];
+            $this->closed = $state["closed"] ?? false;
+            $this->capacity = $state["capacity"] ?? $this->capacity;
+        }
     }
 
     /**
@@ -670,6 +720,14 @@ final class Channel implements IteratorAggregate
         return new self($capacity);
     }
 
+    /**
+     * Create a new inter-process channel.
+     *
+     * The returned Channel is the **owner** (isOwner = true) — it is
+     * responsible for cleaning up the backing file when it is no longer
+     * needed.  Other processes should use Channel::connect() to obtain
+     * a non-owner handle.
+     */
     public static function newInterProcess(
         string $channelName,
         int $capacity = 0,
@@ -684,6 +742,7 @@ final class Channel implements IteratorAggregate
             $serializer,
             $tempDir,
             $preserveObjectTypes,
+            true, // isOwner = true
         );
     }
 
@@ -726,54 +785,56 @@ final class Channel implements IteratorAggregate
         Fiber::suspend();
     }
 
+    /**
+     * Send a value through the inter-process channel.
+     *
+     * Uses a **short-lock + retry-outside-lock** pattern:
+     *   1. Acquire the mutex.
+     *   2. Reload state from disk, try to append the value.
+     *   3. If the buffer is full, release the mutex and sleep briefly
+     *      so that other processes (consumers) can acquire the lock
+     *      and drain the buffer.
+     *   4. Retry from step 1.
+     *
+     * This eliminates the previous deadlock where the mutex was held
+     * for the entire duration of the spin-wait, preventing consumers
+     * from ever running.
+     */
     private function sendInterProcess(mixed $value): void
     {
         if (!$this->bufferMutex) {
             throw new Exception("Buffer mutex not initialized");
         }
 
-        $this->bufferMutex->synchronized(function () use ($value) {
-            $this->loadChannelState();
-
-            if ($this->closed) {
-                throw new Exception("Channel is closed");
-            }
-
-            if (
-                count($this->buffer) < $this->capacity ||
-                $this->capacity === 0
-            ) {
-                $this->buffer[] = $value;
-                $this->saveChannelState();
-                $this->notifyReceivers();
-                return;
-            }
-
-            $this->waitForSpace();
-            $this->buffer[] = $value;
-            $this->saveChannelState();
-            $this->notifyReceivers();
-        });
-    }
-
-    private function waitForSpace(int $timeoutMs = 5000): void
-    {
+        $timeoutMs = 5000;
         $startTime = microtime(true) * 1000;
 
         while (true) {
-            $this->loadChannelState();
+            $sent = $this->bufferMutex->synchronized(function () use ($value) {
+                $this->loadChannelStateRaw();
 
-            if ($this->closed) {
-                throw new Exception("Channel is closed");
-            }
+                if ($this->closed) {
+                    throw new Exception("Channel is closed");
+                }
 
-            if (
-                count($this->buffer) < $this->capacity ||
-                $this->capacity === 0
-            ) {
+                if (
+                    count($this->buffer) < $this->capacity ||
+                    $this->capacity === 0
+                ) {
+                    $this->buffer[] = $value;
+                    $this->saveChannelState();
+                    $this->notifyReceivers();
+                    return true; // success
+                }
+
+                return false; // buffer full — will retry
+            });
+
+            if ($sent) {
                 return;
             }
 
+            // Buffer was full — release the lock, sleep, then retry.
             if (microtime(true) * 1000 - $startTime > $timeoutMs) {
                 throw new Exception("Send timeout: buffer is full");
             }
@@ -821,46 +882,55 @@ final class Channel implements IteratorAggregate
         return Fiber::suspend();
     }
 
+    /**
+     * Receive a value from the inter-process channel.
+     *
+     * Uses the same **short-lock + retry-outside-lock** pattern as
+     * sendInterProcess():
+     *   1. Acquire the mutex.
+     *   2. Reload state from disk, try to shift a value from the buffer.
+     *   3. If the buffer is empty (and the channel is still open),
+     *      release the mutex and sleep briefly so that producers can
+     *      acquire the lock and write data.
+     *   4. Retry from step 1.
+     *
+     * This eliminates the previous deadlock where the mutex was held
+     * for the entire duration of the spin-wait, preventing producers
+     * from ever running.
+     */
     private function receiveInterProcess(): mixed
     {
         if (!$this->bufferMutex) {
             throw new Exception("Buffer mutex not initialized");
         }
 
-        return $this->bufferMutex->synchronized(function () {
-            $this->loadChannelState();
-
-            if (!empty($this->buffer)) {
-                $value = array_shift($this->buffer);
-                $this->saveChannelState();
-                return $value;
-            }
-
-            if ($this->closed) {
-                throw new Exception("Channel is closed and empty");
-            }
-
-            return $this->waitForData();
-        });
-    }
-
-    private function waitForData(int $timeoutMs = 100000)
-    {
+        $timeoutMs = 100000;
         $startTime = microtime(true) * 1000;
 
         while (true) {
-            $this->loadChannelState();
+            $result = $this->bufferMutex->synchronized(function () {
+                $this->loadChannelStateRaw();
 
-            if (!empty($this->buffer)) {
-                $value = array_shift($this->buffer);
-                $this->saveChannelState();
-                return $value;
+                if (!empty($this->buffer)) {
+                    $value = array_shift($this->buffer);
+                    $this->saveChannelState();
+                    // Return a wrapper so we can distinguish "got a value"
+                    // from "buffer was empty" (the value itself could be null).
+                    return ["__found" => true, "value" => $value];
+                }
+
+                if ($this->closed) {
+                    throw new Exception("Channel is closed and empty");
+                }
+
+                return null; // buffer empty — will retry
+            });
+
+            if ($result !== null && ($result["__found"] ?? false)) {
+                return $result["value"];
             }
 
-            if ($this->closed) {
-                throw new Exception("Channel is closed and empty");
-            }
-
+            // Buffer was empty — release the lock, sleep, then retry.
             if (microtime(true) * 1000 - $startTime > $timeoutMs) {
                 throw new Exception("Receive timeout: no data available");
             }
@@ -905,7 +975,7 @@ final class Channel implements IteratorAggregate
         }
 
         return $this->bufferMutex->synchronized(function () use ($value) {
-            $this->loadChannelState();
+            $this->loadChannelStateRaw();
 
             if ($this->closed) {
                 return false;
@@ -953,7 +1023,7 @@ final class Channel implements IteratorAggregate
         }
 
         return $this->bufferMutex->synchronized(function () {
-            $this->loadChannelState();
+            $this->loadChannelStateRaw();
 
             if (!empty($this->buffer)) {
                 $value = array_shift($this->buffer);
@@ -994,6 +1064,7 @@ final class Channel implements IteratorAggregate
     {
         if ($this->bufferMutex) {
             $this->bufferMutex->synchronized(function () {
+                $this->loadChannelStateRaw();
                 $this->closed = true;
                 $this->saveChannelState();
             });
@@ -1004,7 +1075,7 @@ final class Channel implements IteratorAggregate
     {
         if ($this->interProcess && $this->bufferMutex) {
             return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelState();
+                $this->loadChannelStateRaw();
                 return $this->closed;
             });
         }
@@ -1016,7 +1087,7 @@ final class Channel implements IteratorAggregate
     {
         if ($this->interProcess && $this->bufferMutex) {
             return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelState();
+                $this->loadChannelStateRaw();
                 return empty($this->buffer);
             });
         }
@@ -1028,7 +1099,7 @@ final class Channel implements IteratorAggregate
     {
         if ($this->interProcess && $this->bufferMutex) {
             return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelState();
+                $this->loadChannelStateRaw();
                 return count($this->buffer) >= $this->capacity &&
                     $this->capacity > 0;
             });
@@ -1041,7 +1112,7 @@ final class Channel implements IteratorAggregate
     {
         if ($this->interProcess && $this->bufferMutex) {
             return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelState();
+                $this->loadChannelStateRaw();
                 return count($this->buffer);
             });
         }
@@ -1070,6 +1141,15 @@ final class Channel implements IteratorAggregate
         ];
     }
 
+    /**
+     * Clean up inter-process resources.
+     *
+     * - Shared memory is always detached (both owner and connector).
+     * - The backing **file is only deleted by the owner**.  Connectors
+     *   (child processes that obtained this handle via Channel::connect())
+     *   never remove the file so the owner / other processes can still
+     *   read data that was written.
+     */
     public function cleanup(): void
     {
         if ($this->interProcess) {
@@ -1082,11 +1162,25 @@ final class Channel implements IteratorAggregate
                 $this->sharedMemory = null;
             }
 
-            if ($this->channelFile && file_exists($this->channelFile)) {
+            // Only the owner is allowed to delete the backing file.
+            if (
+                $this->isOwner &&
+                $this->channelFile &&
+                file_exists($this->channelFile)
+            ) {
                 @unlink($this->channelFile);
             }
             $this->channelFile = null;
         }
+    }
+
+    /**
+     * Returns true if this Channel instance is the owner (creator) of
+     * the underlying inter-process storage.
+     */
+    public function isOwner(): bool
+    {
+        return $this->isOwner;
     }
 
     public function __destruct()

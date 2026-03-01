@@ -1,0 +1,744 @@
+[01-Mar-2026 09:43:24 UTC] Error: Error in closure execution: Channel 't1_io_prod' does not exist
+#0 laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t1_io_prod");
+            for ($i = 0; $i < 3; $i++) {
+                $ch->send("hello_$i");
+            }
+            return true;
+        }(3): vosaka\foroutines\channel\Channel::connect('t1_io_prod')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t1_io_prod");
+            for ($i = 0; $i < 3; $i++) {
+                $ch->send("hello_$i");
+            }
+            return true;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:24 UTC] Error: Error in closure execution: Channel 't3_io2io' does not exist
+#0 laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t3_io2io");
+            for ($i = 1; $i <= 10; $i++) {
+                $ch->send($i);
+            }
+            return true;
+        }(3): vosaka\foroutines\channel\Channel::connect('t3_io2io')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t3_io2io");
+            for ($i = 1; $i <= 10; $i++) {
+                $ch->send($i);
+            }
+            return true;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't3_io2io' does not exist
+#0 laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t3_io2io");
+            $sum = 0;
+            for ($i = 0; $i < 10; $i++) {
+                $val = $ch->tryReceive();
+                if ($val !== null) {
+                    $sum += $val * $val;
+                }
+            }
+            return $sum;
+        }(3): vosaka\foroutines\channel\Channel::connect('t3_io2io')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t3_io2io");
+            $sum = 0;
+            for ($i = 0; $i < 10; $i++) {
+                $val = $ch->tryReceive();
+                if ($val !== null) {
+                    $sum += $val * $val;
+                }
+            }
+            return $sum;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't4_res' does not exist
+#0 laravel-serializable-closure://function () {
+            $req = \vosaka\foroutines\channel\Channel::connect("t4_req");
+            $res = \vosaka\foroutines\channel\Channel::connect("t4_res");
+            for ($i = 0; $i < 3; $i++) {
+                $ping = $req->tryReceive();
+                if ($ping !== null) {
+                    $pong = \str_replace("ping", "pong", $ping);
+                    $res->send($pong);
+                }
+            }
+            return true;
+        }(4): vosaka\foroutines\channel\Channel::connect('t4_res')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () {
+            $req = \vosaka\foroutines\channel\Channel::connect("t4_req");
+            $res = \vosaka\foroutines\channel\Channel::connect("t4_res");
+            for ($i = 0; $i < 3; $i++) {
+                $ping = $req->tryReceive();
+                if ($ping !== null) {
+                    $pong = \str_replace("ping", "pong", $ping);
+                    $res->send($pong);
+                }
+            }
+            return true;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't5_fanin' does not exist
+#0 laravel-serializable-closure://function () use ($p) {
+                $ch = \vosaka\foroutines\channel\Channel::connect("t5_fanin");
+                for ($i = 1; $i <= 3; $i++) {
+                    $ch->send($p * $i);
+                }
+                return true;
+            }(3): vosaka\foroutines\channel\Channel::connect('t5_fanin')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () use ($p) {
+                $ch = \vosaka\foroutines\channel\Channel::connect("t5_fanin");
+                for ($i = 1; $i <= 3; $i++) {
+                    $ch->send($p * $i);
+                }
+                return true;
+            }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't5_fanin' does not exist
+#0 laravel-serializable-closure://function () use ($p) {
+                $ch = \vosaka\foroutines\channel\Channel::connect("t5_fanin");
+                for ($i = 1; $i <= 3; $i++) {
+                    $ch->send($p * $i);
+                }
+                return true;
+            }(3): vosaka\foroutines\channel\Channel::connect('t5_fanin')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () use ($p) {
+                $ch = \vosaka\foroutines\channel\Channel::connect("t5_fanin");
+                for ($i = 1; $i <= 3; $i++) {
+                    $ch->send($p * $i);
+                }
+                return true;
+            }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't5_fanin' does not exist
+#0 laravel-serializable-closure://function () use ($p) {
+                $ch = \vosaka\foroutines\channel\Channel::connect("t5_fanin");
+                for ($i = 1; $i <= 3; $i++) {
+                    $ch->send($p * $i);
+                }
+                return true;
+            }(3): vosaka\foroutines\channel\Channel::connect('t5_fanin')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () use ($p) {
+                $ch = \vosaka\foroutines\channel\Channel::connect("t5_fanin");
+                for ($i = 1; $i <= 3; $i++) {
+                    $ch->send($p * $i);
+                }
+                return true;
+            }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't6_types' does not exist
+#0 laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t6_types");
+            $ch->send(42);
+            $ch->send(3.14);
+            $ch->send("hello");
+            $ch->send(true);
+            $ch->send([10, 20, 30]);
+            return true;
+        }(3): vosaka\foroutines\channel\Channel::connect('t6_types')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t6_types");
+            $ch->send(42);
+            $ch->send(3.14);
+            $ch->send("hello");
+            $ch->send(true);
+            $ch->send([10, 20, 30]);
+            return true;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't7_large' does not exist
+#0 laravel-serializable-closure://function () use ($largePayload) {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t7_large");
+            $ch->send($largePayload);
+            return true;
+        }(3): vosaka\foroutines\channel\Channel::connect('t7_large')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () use ($largePayload) {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t7_large");
+            $ch->send($largePayload);
+            return true;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:25 UTC] Error: Error in closure execution: Channel 't8_close' does not exist
+#0 laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t8_close");
+            $ch->send("before_close");
+            $ch->close();
+            return true;
+        }(3): vosaka\foroutines\channel\Channel::connect('t8_close')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t8_close");
+            $ch->send("before_close");
+            $ch->close();
+            return true;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:43:26 UTC] Error: Error in closure execution: Channel 't9_try' does not exist
+#0 laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t9_try");
+            $ok = $ch->trySend("io_nonblocking");
+            return $ok;
+        }(3): vosaka\foroutines\channel\Channel::connect('t9_try')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () {
+            $ch = \vosaka\foroutines\channel\Channel::connect("t9_try");
+            $ok = $ch->trySend("io_nonblocking");
+            return $ok;
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
+[01-Mar-2026 09:44:21 UTC] Error: Error in closure execution: Channel 'debug2_ch_50928_1772358261' does not exist
+#0 laravel-serializable-closure://function () use ($channelName, $channelFile) {
+            // Inside child process
+            $pid = \getmypid();
+            echo "[Child PID=$pid] Connecting to channel '$channelName'\n";
+            echo "[Child PID=$pid] File exists before connect: " . (\file_exists($channelFile) ? "yes" : "no") . "\n";
+
+            $childCh = \vosaka\foroutines\channel\Channel::connect($channelName);
+
+            echo "[Child PID=$pid] Connected. isOwner: " . ($childCh->isOwner() ? "true" : "false") . "\n";
+
+            for ($i = 0; $i < 3; $i++) {
+                $childCh->send("hello_$i");
+                echo "[Child PID=$pid] Sent: hello_$i\n";
+            }
+
+            // Check file content after sends
+            if (\file_exists($channelFile)) {
+                $raw = \file_get_contents($channelFile);
+                echo "[Child PID=$pid] File size after sends: " . \strlen($raw) . " bytes\n";
+                // Try to peek at state
+                $state = @\unserialize($raw);
+                if (\is_array($state)) {
+                    echo "[Child PID=$pid] Buffer count in file: " . \count($state['buffer'] ?? []) . "\n";
+                    echo "[Child PID=$pid] Closed in file: " . ($state['closed'] ?? 'N/A') . "\n";
+                }
+            } else {
+                echo "[Child PID=$pid] WARNING: File does not exist after sends!\n";
+            }
+
+            return "send_done";
+        }(8): vosaka\foroutines\channel\Channel::connect('debug2_ch_50928...')
+#1 laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }(21): {closure:laravel-serializable-closure://function () use ($channelName, $channelFile) {
+            // Inside child process
+            $pid = \getmypid();
+            echo "[Child PID=$pid] Connecting to channel '$channelName'\n";
+            echo "[Child PID=$pid] File exists before connect: " . (\file_exists($channelFile) ? "yes" : "no") . "\n";
+
+            $childCh = \vosaka\foroutines\channel\Channel::connect($channelName);
+
+            echo "[Child PID=$pid] Connected. isOwner: " . ($childCh->isOwner() ? "true" : "false") . "\n";
+
+            for ($i = 0; $i < 3; $i++) {
+                $childCh->send("hello_$i");
+                echo "[Child PID=$pid] Sent: hello_$i\n";
+            }
+
+            // Check file content after sends
+            if (\file_exists($channelFile)) {
+                $raw = \file_get_contents($channelFile);
+                echo "[Child PID=$pid] File size after sends: " . \strlen($raw) . " bytes\n";
+                // Try to peek at state
+                $state = @\unserialize($raw);
+                if (\is_array($state)) {
+                    echo "[Child PID=$pid] Buffer count in file: " . \count($state['buffer'] ?? []) . "\n";
+                    echo "[Child PID=$pid] Closed in file: " . ($state['closed'] ?? 'N/A') . "\n";
+                }
+            } else {
+                echo "[Child PID=$pid] WARNING: File does not exist after sends!\n";
+            }
+
+            return "send_done";
+        }:2}()
+#2 C:\Users\VennDev\OneDrive\Desktop\vosaka-php\vosaka-fourotines\src\vosaka\foroutines\background_processor_file.php(60): vosaka\foroutines\CallableUtils::{closure:laravel-serializable-closure://function () use ($serializedCallable, $filesToRequire) {
+            // 2a. Load the required user files.  This ensures that:
+            //     - Class definitions are known BEFORE unserialize() tries
+            //       to hydrate captured objects (avoids __PHP_Incomplete_Class)
+            //     - User-defined functions are available when the closure
+            //       body executes
+            foreach ($filesToRequire as $file) {
+                if (is_file($file) && !in_array($file, get_included_files())) {
+                    require_once $file;
+                }
+            }
+
+            // 2b. Unserialize the real closure.  All captured user objects
+            //     will be fully hydrated because their class definitions
+            //     were loaded in step 2a.
+            /** @var SerializableClosure $sc */
+            $sc = unserialize($serializedCallable);
+
+            // 2c. Execute.
+            return call_user_func($sc->getClosure());
+        }:2}()
+#3 {main}
