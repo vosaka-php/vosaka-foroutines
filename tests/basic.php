@@ -37,7 +37,7 @@ main(function () {
         });
 
         Launch::new(function (): Generator {
-            Delay::new(1000);
+            sleep(1);
             var_dump("Generator 1 completed");
             return yield 20;
         }, Dispatchers::IO);

@@ -47,10 +47,18 @@ final class RunBlocking
         callable|Generator|Async|Fiber $callable,
         Dispatchers $dispatchers = Dispatchers::DEFAULT,
     ): void {
-        if ($dispatchers === Dispatchers::IO) {
-            WorkerPool::addAsync($callable);
-            return;
-        }
+        // NOTE: Dispatchers::IO on RunBlocking is treated the same as
+        // DEFAULT. The closure typically contains scheduler primitives
+        // (Launch, Delay, Repeat, WithTimeout, Async, Thread::await)
+        // that depend on the parent process's event loop. Sending the
+        // entire closure to a worker process would orphan those
+        // primitives because workers have no scheduler.
+        //
+        // Individual heavy I/O operations inside the closure should
+        // use Async::new(fn, Dispatchers::IO) or Launch::new(fn,
+        // Dispatchers::IO) which correctly dispatch just that unit of
+        // work to the WorkerPool while keeping the orchestration in
+        // the parent.
 
         if (!$callable instanceof Fiber) {
             $callable = FiberUtils::makeFiber($callable);
