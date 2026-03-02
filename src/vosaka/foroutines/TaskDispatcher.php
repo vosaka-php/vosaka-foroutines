@@ -71,18 +71,45 @@ final class TaskDispatcher
             $closure = $task["closure"];
             $taskId = $task["id"];
 
-            // Serialize the closure using SerializableClosure
+            // Serialize the closure using SerializableClosure.
+            //
+            // Fork mode (Linux/macOS): The child process inherits the
+            // entire parent memory via pcntl_fork(), so ALL class and
+            // function definitions are already available. Wrapping with
+            // makeCallableForThread() would generate a temp file that
+            // re-declares classes the child already knows about, causing
+            // "Cannot redeclare class …" fatal errors.
+            //
+            // Socket mode (Windows / fallback): The child is a fresh
+            // PHP process (proc_open) that only has Composer autoload.
+            // User classes defined in the entry script (e.g. test files)
+            // are NOT autoloadable, so makeCallableForThread() extracts
+            // them into a temp file and prepends a require_once wrapper.
             try {
-                $serialized = serialize(
-                    new SerializableClosure(
-                        Closure::fromCallable(
-                            CallableUtils::makeCallableForThread(
-                                $closure,
-                                get_included_files(),
+                $isForkMode =
+                    (WorkerPoolState::$workers[$i]["mode"] ?? "") === "fork";
+
+                if ($isForkMode) {
+                    // Direct serialization — child already has everything.
+                    $serialized = serialize(
+                        new SerializableClosure(
+                            Closure::fromCallable($closure),
+                        ),
+                    );
+                } else {
+                    // Wrap with file-loading preamble for fresh child process.
+                    $serialized = serialize(
+                        new SerializableClosure(
+                            Closure::fromCallable(
+                                CallableUtils::makeCallableForThread(
+                                    $closure,
+                                    get_included_files(),
+                                ),
                             ),
                         ),
-                    ),
-                );
+                    );
+                }
+
                 $encoded = base64_encode($serialized);
             } catch (\Throwable $e) {
                 WorkerPoolState::$returns[$taskId] =
@@ -91,7 +118,10 @@ final class TaskDispatcher
             }
 
             // Send to worker
-            $sent = WorkerPoolCommunication::sendToWorker($i, "TASK:" . $encoded);
+            $sent = WorkerPoolCommunication::sendToWorker(
+                $i,
+                "TASK:" . $encoded,
+            );
 
             if ($sent) {
                 WorkerPoolState::$workers[$i]["busy"] = true;
@@ -146,7 +176,9 @@ final class TaskDispatcher
                         if ($decoded === false) {
                             throw new \RuntimeException("base64_decode failed");
                         }
-                        WorkerPoolState::$returns[$taskId] = unserialize($decoded);
+                        WorkerPoolState::$returns[$taskId] = unserialize(
+                            $decoded,
+                        );
                     } catch (\Throwable $e) {
                         WorkerPoolState::$returns[$taskId] =
                             "Error: Failed to decode result: " .
@@ -164,7 +196,8 @@ final class TaskDispatcher
                         $message = is_array($errorData)
                             ? $errorData["message"] ?? "Unknown worker error"
                             : "Unknown worker error";
-                        WorkerPoolState::$returns[$taskId] = "Error: " . $message;
+                        WorkerPoolState::$returns[$taskId] =
+                            "Error: " . $message;
                     } catch (\Throwable) {
                         WorkerPoolState::$returns[$taskId] =
                             "Error: Worker error (decode failed)";
