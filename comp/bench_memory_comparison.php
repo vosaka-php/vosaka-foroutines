@@ -798,11 +798,13 @@ main(function () {
     echo "\n";
 
     // ═════════════════════════════════════════════════════════════════
-    // Test 5: Socket channel (Channel::create) — broker process cost
+    // Test 5: Socket channel (Channel::create) — pool process cost
+    // Channel::create() now uses a shared ChannelBrokerPool by default.
+    // All channels share 1 background process instead of N processes.
     // ═════════════════════════════════════════════════════════════════
     echo cc(
         C_YELLOW,
-        "  ▸ Test 5: Socket channel (Channel::create) — broker overhead",
+        "  ▸ Test 5: Socket channel (Channel::create) — pool overhead",
     ) . "\n";
 
     // Node.js equivalent: spawn a child_process that acts as a broker
@@ -857,7 +859,11 @@ main(function () {
     echo "    PHP parent Δ: " .
         memFmt($phpDelta) .
         "  (parent-side bookkeeping)\n";
-    echo "    Transport:    " . $chSocket->getTransport() . "\n";
+    echo "    Transport:    " .
+        $chSocket->getTransport() .
+        " (pool mode = " .
+        ($chSocket->isPoolMode() ? "yes" : "no") .
+        ")\n";
     echo "    Port:         " . $chSocket->getSocketPort() . "\n";
 
     // Measure ACTUAL broker process memory via OS
@@ -2479,10 +2485,15 @@ main(function () {
     echo "  " .
         cc(C_BOLD, "External Process Memory (critical difference):") .
         "\n";
-    echo "    • Each " .
-        cc(C_YELLOW, "Channel::create()") .
-        " spawns a broker process: " .
-        cc(C_RED, "~4-8 MB") .
+    echo "    • " .
+        cc(C_GREEN, "Channel::create()") .
+        " uses a shared pool process (1 process for ALL channels): " .
+        cc(C_GREEN, "~4-8 MB total") .
+        "\n";
+    echo "    • Legacy " .
+        cc(C_YELLOW, "newSocketInterProcess()") .
+        " spawns 1 broker per channel: " .
+        cc(C_RED, "~4-8 MB each") .
         "\n";
     echo "    • Each " .
         cc(C_YELLOW, "Dispatchers::IO") .
@@ -2497,13 +2508,17 @@ main(function () {
         " per thread (V8 isolate)\n\n";
 
     echo "  " . cc(C_BOLD, "Total Memory Formula (FAIR comparison):") . "\n";
-    echo "    PHP Total = Parent RSS + (N_brokers × ~19 MB) + (WorkerPool_size × ~19 MB)\n";
+    echo "    PHP Total (pool) = Parent RSS + (1 pool × ~19 MB) + (WorkerPool_size × ~19 MB)\n";
+    echo "    PHP Total (legacy) = Parent RSS + (N_brokers × ~19 MB) + (WorkerPool_size × ~19 MB)\n";
     echo "    Node Total = Process RSS + (N_worker_threads × ~8-12 MB) + (N_child_procs × ~20-30 MB)\n\n";
 
     echo "  " .
         cc(C_BOLD, "Example scenario — 3 socket channels + 4 IO workers:") .
         "\n";
-    echo "    PHP:  ~10 MB (parent) + 3×19 MB (brokers) + 4×19 MB (workers) = " .
+    echo "    PHP (pool):   ~10 MB (parent) + 1×19 MB (pool) + 4×19 MB (workers) = " .
+        cc(C_GREEN, "~105 MB total") .
+        "\n";
+    echo "    PHP (legacy): ~10 MB (parent) + 3×19 MB (brokers) + 4×19 MB (workers) = " .
         cc(C_RED, "~143 MB total") .
         "\n";
     echo "    Node: ~40 MB (parent) + 3×25 MB (child_process brokers) + 4×10 MB (threads) = " .

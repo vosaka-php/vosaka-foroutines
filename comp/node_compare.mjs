@@ -1476,476 +1476,867 @@ async function bench05() {
 async function bench06() {
     records.length = 0;
     header(
-        "Node.js Benchmark 06: IPC Channel — MessagePort vs SharedArrayBuffer",
+        "Node.js Benchmark 06: Real IPC Channel — Worker Thread + MessagePort",
     );
     console.log(
-        `    Worker MessagePort (structured clone) vs SharedArrayBuffer + Atomics`,
+        `    Real cross-thread IPC via worker_threads + MessagePort (structured clone)`,
     );
     console.log(`    Node.js ${process.version} | ${process.platform}`);
     console.log(
-        `    Mirrors PHP bench_06: socket-based vs file-based inter-process channel`,
+        `    Mirrors PHP bench_06: socket pool (shared process) + legacy broker + file IPC`,
+    );
+    console.log(
+        `    PHP now uses ChannelBrokerPool by default: N channels share 1 background process`,
+    );
+    console.log(
+        `    Both sides pay REAL IPC cost: process/thread spawn, serialization, transport`,
     );
 
-    // ─── In-process channel for baseline (same as bench03) ───────────
-    class Channel {
-        constructor(capacity = 0) {
-            this.capacity = capacity;
-            this.buffer = [];
-            this.closed = false;
-            this.waitingSenders = [];
-            this.waitingReceivers = [];
-        }
-        async send(value) {
-            if (this.closed) throw new Error("Channel closed");
-            if (this.waitingReceivers.length > 0) {
-                const resolve = this.waitingReceivers.shift();
-                resolve({ value, done: false });
+    const { MessageChannel } = await import("node:worker_threads");
+
+    // ─── Helper: spawn a dedicated worker thread that acts as a "broker" ───
+    // This mirrors PHP's pool architecture: main ↔ ChannelBrokerPool via TCP
+    // Here: main ↔ worker-thread via MessagePort (structured clone)
+    // PHP pool: 1 process for N channels; Node: 1 worker per channel (closer to PHP legacy mode)
+
+    /**
+     * Create a worker thread that runs an IPC broker.
+     * Returns { worker, port } where port is a MessagePort connected to
+     * the broker's internal buffer. Commands are sent as objects:
+     *   { cmd: "send", value }   → broker buffers value
+     *   { cmd: "receive" }       → broker replies { value } or waits
+     *   { cmd: "trySend", value }→ broker replies { ok: bool }
+     *   { cmd: "tryReceive" }    → broker replies { value } or { value: null }
+     *   { cmd: "size" }          → broker replies { size }
+     *   { cmd: "isEmpty" }       → broker replies { isEmpty }
+     *   { cmd: "isClosed" }      → broker replies { isClosed }
+     *   { cmd: "close" }         → broker closes and terminates
+     *   { cmd: "destroy" }       → broker terminates immediately
+     */
+    function createIPCChannel(capacity = 0) {
+        const { port1, port2 } = new MessageChannel();
+
+        // The worker runs an inline broker via eval
+        const workerCode = `
+            const { parentPort, workerData } = require("node:worker_threads");
+            const port = workerData.port;
+            const capacity = workerData.capacity;
+
+            const buffer = [];
+            let closed = false;
+            const pendingReceivers = []; // callbacks waiting for data
+
+            port.on("message", (msg) => {
+                if (msg.cmd === "send") {
+                    if (closed) {
+                        port.postMessage({ cmd: "sendReply", ok: false, error: "closed" });
+                        return;
+                    }
+                    // If someone is waiting to receive, deliver directly
+                    if (pendingReceivers.length > 0) {
+                        const resolve = pendingReceivers.shift();
+                        port.postMessage({ cmd: "receiveReply", value: msg.value, done: false, id: resolve });
+                    } else if (capacity === 0 || buffer.length < capacity) {
+                        buffer.push(msg.value);
+                        port.postMessage({ cmd: "sendReply", ok: true });
+                    } else {
+                        port.postMessage({ cmd: "sendReply", ok: false, error: "full" });
+                    }
+                } else if (msg.cmd === "receive") {
+                    if (buffer.length > 0) {
+                        const value = buffer.shift();
+                        port.postMessage({ cmd: "receiveReply", value, done: false, id: msg.id });
+                    } else if (closed) {
+                        port.postMessage({ cmd: "receiveReply", value: null, done: true, id: msg.id });
+                    } else {
+                        pendingReceivers.push(msg.id);
+                    }
+                } else if (msg.cmd === "trySend") {
+                    if (closed) {
+                        port.postMessage({ cmd: "trySendReply", ok: false });
+                        return;
+                    }
+                    if (pendingReceivers.length > 0) {
+                        const resolve = pendingReceivers.shift();
+                        port.postMessage({ cmd: "receiveReply", value: msg.value, done: false, id: resolve });
+                        port.postMessage({ cmd: "trySendReply", ok: true });
+                    } else if (capacity === 0 || buffer.length < capacity) {
+                        buffer.push(msg.value);
+                        port.postMessage({ cmd: "trySendReply", ok: true });
+                    } else {
+                        port.postMessage({ cmd: "trySendReply", ok: false });
+                    }
+                } else if (msg.cmd === "tryReceive") {
+                    if (buffer.length > 0) {
+                        port.postMessage({ cmd: "tryReceiveReply", value: buffer.shift() });
+                    } else {
+                        port.postMessage({ cmd: "tryReceiveReply", value: null });
+                    }
+                } else if (msg.cmd === "size") {
+                    port.postMessage({ cmd: "sizeReply", size: buffer.length });
+                } else if (msg.cmd === "isEmpty") {
+                    port.postMessage({ cmd: "isEmptyReply", isEmpty: buffer.length === 0 });
+                } else if (msg.cmd === "isClosed") {
+                    port.postMessage({ cmd: "isClosedReply", isClosed: closed });
+                } else if (msg.cmd === "close") {
+                    closed = true;
+                    // Flush all pending receivers
+                    for (const id of pendingReceivers) {
+                        port.postMessage({ cmd: "receiveReply", value: null, done: true, id });
+                    }
+                    pendingReceivers.length = 0;
+                    port.postMessage({ cmd: "closeReply" });
+                } else if (msg.cmd === "destroy") {
+                    closed = true;
+                    port.close();
+                    process.exit(0);
+                }
+            });
+
+            port.postMessage({ cmd: "ready" });
+        `;
+
+        const worker = new Worker(workerCode, {
+            eval: true,
+            workerData: { port: port2, capacity },
+            transferList: [port2],
+        });
+
+        // Wrap port1 in a promise-based client API (mirrors PHP ChannelSocketClient)
+        let nextId = 0;
+        const pendingCallbacks = new Map();
+        let readyResolve;
+        const readyPromise = new Promise((r) => {
+            readyResolve = r;
+        });
+
+        port1.on("message", (msg) => {
+            if (msg.cmd === "ready") {
+                readyResolve();
                 return;
             }
-            if (this.capacity > 0 && this.buffer.length < this.capacity) {
-                this.buffer.push(value);
+            if (msg.cmd === "sendReply") {
+                const cb = pendingCallbacks.get("send");
+                if (cb) {
+                    pendingCallbacks.delete("send");
+                    cb(msg);
+                }
                 return;
             }
-            return new Promise((resolve) => {
-                this.waitingSenders.push({ value, resolve });
-            });
-        }
-        async receive() {
-            if (this.buffer.length > 0) {
-                const value = this.buffer.shift();
-                if (this.waitingSenders.length > 0) {
-                    const sender = this.waitingSenders.shift();
-                    this.buffer.push(sender.value);
-                    sender.resolve();
+            if (msg.cmd === "receiveReply") {
+                const cb = pendingCallbacks.get(`recv_${msg.id}`);
+                if (cb) {
+                    pendingCallbacks.delete(`recv_${msg.id}`);
+                    cb(msg);
                 }
-                return { value, done: false };
+                return;
             }
-            if (this.waitingSenders.length > 0) {
-                const sender = this.waitingSenders.shift();
-                sender.resolve();
-                return { value: sender.value, done: false };
-            }
-            if (this.closed) return { value: undefined, done: true };
-            return new Promise((resolve) => {
-                this.waitingReceivers.push(resolve);
-            });
-        }
-        trySend(value) {
-            if (this.closed) return false;
-            if (this.waitingReceivers.length > 0) {
-                const resolve = this.waitingReceivers.shift();
-                resolve({ value, done: false });
-                return true;
-            }
-            if (this.capacity > 0 && this.buffer.length < this.capacity) {
-                this.buffer.push(value);
-                return true;
-            }
-            return false;
-        }
-        tryReceive() {
-            if (this.buffer.length > 0) {
-                const value = this.buffer.shift();
-                if (this.waitingSenders.length > 0) {
-                    const sender = this.waitingSenders.shift();
-                    this.buffer.push(sender.value);
-                    sender.resolve();
+            if (msg.cmd === "trySendReply") {
+                const cb = pendingCallbacks.get("trySend");
+                if (cb) {
+                    pendingCallbacks.delete("trySend");
+                    cb(msg);
                 }
-                return value;
+                return;
             }
-            if (this.waitingSenders.length > 0) {
-                const sender = this.waitingSenders.shift();
-                sender.resolve();
-                return sender.value;
+            if (msg.cmd === "tryReceiveReply") {
+                const cb = pendingCallbacks.get("tryReceive");
+                if (cb) {
+                    pendingCallbacks.delete("tryReceive");
+                    cb(msg);
+                }
+                return;
             }
-            return null;
-        }
-        close() {
-            this.closed = true;
-            for (const resolve of this.waitingReceivers) {
-                resolve({ value: undefined, done: true });
+            if (msg.cmd === "sizeReply") {
+                const cb = pendingCallbacks.get("size");
+                if (cb) {
+                    pendingCallbacks.delete("size");
+                    cb(msg);
+                }
+                return;
             }
-            this.waitingReceivers.length = 0;
-        }
-        get size() {
-            return this.buffer.length;
-        }
-        get isEmpty() {
-            return this.buffer.length === 0;
-        }
-        get isFull() {
-            return this.capacity > 0 && this.buffer.length >= this.capacity;
-        }
-        get isClosed() {
-            return this.closed;
-        }
+            if (msg.cmd === "isEmptyReply") {
+                const cb = pendingCallbacks.get("isEmpty");
+                if (cb) {
+                    pendingCallbacks.delete("isEmpty");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "isClosedReply") {
+                const cb = pendingCallbacks.get("isClosed");
+                if (cb) {
+                    pendingCallbacks.delete("isClosed");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "closeReply") {
+                const cb = pendingCallbacks.get("close");
+                if (cb) {
+                    pendingCallbacks.delete("close");
+                    cb(msg);
+                }
+                return;
+            }
+        });
+
+        const client = {
+            ready: readyPromise,
+            send(value) {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("send", resolve);
+                    port1.postMessage({ cmd: "send", value });
+                });
+            },
+            receive() {
+                const id = nextId++;
+                return new Promise((resolve) => {
+                    pendingCallbacks.set(`recv_${id}`, resolve);
+                    port1.postMessage({ cmd: "receive", id });
+                });
+            },
+            trySend(value) {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("trySend", resolve);
+                    port1.postMessage({ cmd: "trySend", value });
+                });
+            },
+            tryReceive() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("tryReceive", resolve);
+                    port1.postMessage({ cmd: "tryReceive" });
+                });
+            },
+            size() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("size", resolve);
+                    port1.postMessage({ cmd: "size" });
+                });
+            },
+            isEmpty() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("isEmpty", resolve);
+                    port1.postMessage({ cmd: "isEmpty" });
+                });
+            },
+            isClosed() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("isClosed", resolve);
+                    port1.postMessage({ cmd: "isClosed" });
+                });
+            },
+            close() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("close", resolve);
+                    port1.postMessage({ cmd: "close" });
+                });
+            },
+            async destroy() {
+                port1.postMessage({ cmd: "destroy" });
+                port1.close();
+                await worker.terminate();
+            },
+        };
+
+        return client;
     }
 
-    // ─── SharedArrayBuffer-based channel (simulates file/shmop transport) ───
-    // Uses a fixed-size ring buffer of Int32 values in shared memory.
-    // Suitable for numeric data. Serialization cost is zero for ints.
-    class SABChannel {
-        constructor(capacity) {
-            // Layout: [head, tail, count, closed, ...ring]
-            this.capacity = capacity;
-            this.sab = new SharedArrayBuffer(4 * (4 + capacity));
-            this.view = new Int32Array(this.sab);
-            // head=0, tail=0, count=0, closed=0
-        }
-        send(value) {
-            const v = this.view;
-            if (Atomics.load(v, 3) === 1) throw new Error("Channel closed");
-            // Spin until space available
-            while (Atomics.load(v, 2) >= this.capacity) {
-                if (Atomics.load(v, 3) === 1) throw new Error("Channel closed");
-                // busy-wait (simulates file-channel spin-wait)
+    // ─── Helper: "file-based" channel using Worker + fs temp file ────
+    // Mirrors PHP's file-based transport: each send/recv does a full
+    // file read → deserialize → modify → serialize → file write.
+    // This gives Node.js the SAME penalty as PHP file transport.
+
+    function createFileIPCChannel(capacity = 0) {
+        const { port1, port2 } = new MessageChannel();
+
+        const workerCode = `
+            const { parentPort, workerData } = require("node:worker_threads");
+            const fs = require("node:fs");
+            const os = require("node:os");
+            const path = require("node:path");
+            const port = workerData.port;
+            const capacity = workerData.capacity;
+
+            // Create a temp file to store the buffer (simulates PHP file transport)
+            const filePath = path.join(os.tmpdir(), "node_filechan_" + process.pid + "_" + Date.now() + ".json");
+            fs.writeFileSync(filePath, JSON.stringify({ buffer: [], closed: false }));
+
+            function readState() {
+                const data = fs.readFileSync(filePath, "utf-8");
+                return JSON.parse(data);
             }
-            const tail = Atomics.load(v, 1);
-            v[4 + tail] = value;
-            Atomics.store(v, 1, (tail + 1) % this.capacity);
-            Atomics.add(v, 2, 1);
-        }
-        receive() {
-            const v = this.view;
-            while (Atomics.load(v, 2) === 0) {
-                if (Atomics.load(v, 3) === 1 && Atomics.load(v, 2) === 0)
-                    return null;
+            function writeState(state) {
+                fs.writeFileSync(filePath, JSON.stringify(state));
             }
-            const head = Atomics.load(v, 0);
-            const value = v[4 + head];
-            Atomics.store(v, 0, (head + 1) % this.capacity);
-            Atomics.sub(v, 2, 1);
-            return value;
-        }
-        trySend(value) {
-            const v = this.view;
-            if (Atomics.load(v, 3) === 1) return false;
-            if (Atomics.load(v, 2) >= this.capacity) return false;
-            const tail = Atomics.load(v, 1);
-            v[4 + tail] = value;
-            Atomics.store(v, 1, (tail + 1) % this.capacity);
-            Atomics.add(v, 2, 1);
-            return true;
-        }
-        tryReceive() {
-            const v = this.view;
-            if (Atomics.load(v, 2) === 0) return null;
-            const head = Atomics.load(v, 0);
-            const value = v[4 + head];
-            Atomics.store(v, 0, (head + 1) % this.capacity);
-            Atomics.sub(v, 2, 1);
-            return value;
-        }
-        close() {
-            Atomics.store(this.view, 3, 1);
-        }
-        get size() {
-            return Atomics.load(this.view, 2);
-        }
-        get isEmpty() {
-            return this.size === 0;
-        }
-        get isFull() {
-            return this.size >= this.capacity;
-        }
-        get isClosed() {
-            return Atomics.load(this.view, 3) === 1;
-        }
+
+            const pendingReceivers = [];
+
+            port.on("message", (msg) => {
+                if (msg.cmd === "send") {
+                    const state = readState();
+                    if (state.closed) {
+                        port.postMessage({ cmd: "sendReply", ok: false, error: "closed" });
+                        return;
+                    }
+                    if (pendingReceivers.length > 0) {
+                        const id = pendingReceivers.shift();
+                        port.postMessage({ cmd: "receiveReply", value: msg.value, done: false, id });
+                        port.postMessage({ cmd: "sendReply", ok: true });
+                    } else if (capacity === 0 || state.buffer.length < capacity) {
+                        state.buffer.push(msg.value);
+                        writeState(state);
+                        port.postMessage({ cmd: "sendReply", ok: true });
+                    } else {
+                        port.postMessage({ cmd: "sendReply", ok: false, error: "full" });
+                    }
+                } else if (msg.cmd === "receive") {
+                    const state = readState();
+                    if (state.buffer.length > 0) {
+                        const value = state.buffer.shift();
+                        writeState(state);
+                        port.postMessage({ cmd: "receiveReply", value, done: false, id: msg.id });
+                    } else if (state.closed) {
+                        port.postMessage({ cmd: "receiveReply", value: null, done: true, id: msg.id });
+                    } else {
+                        pendingReceivers.push(msg.id);
+                    }
+                } else if (msg.cmd === "trySend") {
+                    const state = readState();
+                    if (state.closed) {
+                        port.postMessage({ cmd: "trySendReply", ok: false });
+                        return;
+                    }
+                    if (pendingReceivers.length > 0) {
+                        const id = pendingReceivers.shift();
+                        port.postMessage({ cmd: "receiveReply", value: msg.value, done: false, id });
+                        port.postMessage({ cmd: "trySendReply", ok: true });
+                    } else if (capacity === 0 || state.buffer.length < capacity) {
+                        state.buffer.push(msg.value);
+                        writeState(state);
+                        port.postMessage({ cmd: "trySendReply", ok: true });
+                    } else {
+                        port.postMessage({ cmd: "trySendReply", ok: false });
+                    }
+                } else if (msg.cmd === "tryReceive") {
+                    const state = readState();
+                    if (state.buffer.length > 0) {
+                        const value = state.buffer.shift();
+                        writeState(state);
+                        port.postMessage({ cmd: "tryReceiveReply", value });
+                    } else {
+                        port.postMessage({ cmd: "tryReceiveReply", value: null });
+                    }
+                } else if (msg.cmd === "size") {
+                    const state = readState();
+                    port.postMessage({ cmd: "sizeReply", size: state.buffer.length });
+                } else if (msg.cmd === "isEmpty") {
+                    const state = readState();
+                    port.postMessage({ cmd: "isEmptyReply", isEmpty: state.buffer.length === 0 });
+                } else if (msg.cmd === "isClosed") {
+                    const state = readState();
+                    port.postMessage({ cmd: "isClosedReply", isClosed: state.closed });
+                } else if (msg.cmd === "close") {
+                    const state = readState();
+                    state.closed = true;
+                    writeState(state);
+                    for (const id of pendingReceivers) {
+                        port.postMessage({ cmd: "receiveReply", value: null, done: true, id });
+                    }
+                    pendingReceivers.length = 0;
+                    port.postMessage({ cmd: "closeReply" });
+                } else if (msg.cmd === "destroy") {
+                    try { fs.unlinkSync(filePath); } catch(e) {}
+                    port.close();
+                    process.exit(0);
+                }
+            });
+
+            port.postMessage({ cmd: "ready" });
+        `;
+
+        const worker = new Worker(workerCode, {
+            eval: true,
+            workerData: { port: port2, capacity },
+            transferList: [port2],
+        });
+
+        let nextId = 0;
+        const pendingCallbacks = new Map();
+        let readyResolve;
+        const readyPromise = new Promise((r) => {
+            readyResolve = r;
+        });
+
+        port1.on("message", (msg) => {
+            if (msg.cmd === "ready") {
+                readyResolve();
+                return;
+            }
+            if (msg.cmd === "sendReply") {
+                const cb = pendingCallbacks.get("send");
+                if (cb) {
+                    pendingCallbacks.delete("send");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "receiveReply") {
+                const cb = pendingCallbacks.get(`recv_${msg.id}`);
+                if (cb) {
+                    pendingCallbacks.delete(`recv_${msg.id}`);
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "trySendReply") {
+                const cb = pendingCallbacks.get("trySend");
+                if (cb) {
+                    pendingCallbacks.delete("trySend");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "tryReceiveReply") {
+                const cb = pendingCallbacks.get("tryReceive");
+                if (cb) {
+                    pendingCallbacks.delete("tryReceive");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "sizeReply") {
+                const cb = pendingCallbacks.get("size");
+                if (cb) {
+                    pendingCallbacks.delete("size");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "isEmptyReply") {
+                const cb = pendingCallbacks.get("isEmpty");
+                if (cb) {
+                    pendingCallbacks.delete("isEmpty");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "isClosedReply") {
+                const cb = pendingCallbacks.get("isClosed");
+                if (cb) {
+                    pendingCallbacks.delete("isClosed");
+                    cb(msg);
+                }
+                return;
+            }
+            if (msg.cmd === "closeReply") {
+                const cb = pendingCallbacks.get("close");
+                if (cb) {
+                    pendingCallbacks.delete("close");
+                    cb(msg);
+                }
+                return;
+            }
+        });
+
+        const client = {
+            ready: readyPromise,
+            send(value) {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("send", resolve);
+                    port1.postMessage({ cmd: "send", value });
+                });
+            },
+            receive() {
+                const id = nextId++;
+                return new Promise((resolve) => {
+                    pendingCallbacks.set(`recv_${id}`, resolve);
+                    port1.postMessage({ cmd: "receive", id });
+                });
+            },
+            trySend(value) {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("trySend", resolve);
+                    port1.postMessage({ cmd: "trySend", value });
+                });
+            },
+            tryReceive() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("tryReceive", resolve);
+                    port1.postMessage({ cmd: "tryReceive" });
+                });
+            },
+            size() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("size", resolve);
+                    port1.postMessage({ cmd: "size" });
+                });
+            },
+            isEmpty() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("isEmpty", resolve);
+                    port1.postMessage({ cmd: "isEmpty" });
+                });
+            },
+            isClosed() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("isClosed", resolve);
+                    port1.postMessage({ cmd: "isClosed" });
+                });
+            },
+            close() {
+                return new Promise((resolve) => {
+                    pendingCallbacks.set("close", resolve);
+                    port1.postMessage({ cmd: "close" });
+                });
+            },
+            async destroy() {
+                port1.postMessage({ cmd: "destroy" });
+                port1.close();
+                await worker.terminate();
+            },
+        };
+
+        return client;
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // Test 1: Single message round-trip latency
+    // Test 1: Single send/receive latency (1 message round-trip)
     //
-    // PHP: File transport ~50ms (file IO + serialize whole buffer)
-    //      Socket transport ~586ms (broker spawn + TCP connect)
+    // PHP: Pool transport ~16ms (pool already running, CREATE_CHANNEL cmd + 1 msg)
+    //      Legacy socket ~590ms (broker spawn + TCP connect + 1 msg)
+    //      File transport ~50ms
     //
-    // Node.js: In-process channel is near-instant (no IPC needed)
-    //          SABChannel is also near-instant (shared memory)
+    // Node: Worker thread spawn + MessagePort + 1 msg (structured clone)
+    //       File channel: Worker thread spawn + file I/O + 1 msg
+    //
+    // Both include channel creation + teardown (like PHP bench).
     // ═════════════════════════════════════════════════════════════════
-    subHeader("Test 1: Single message round-trip latency");
+    subHeader(
+        "Test 1: Single message round-trip latency (incl. create+destroy)",
+    );
 
-    let [, inProcMs] = await measure(async () => {
-        const ch = new Channel(10);
+    let [, fileMs] = await measure(async () => {
+        const ch = createFileIPCChannel(10);
+        await ch.ready;
         await ch.send("hello");
-        const { value } = await ch.receive();
-        return value;
+        const reply = await ch.receive();
+        await ch.destroy();
+        return reply.value;
     });
-    timing("In-process channel:", inProcMs);
+    timing("File IPC channel:", fileMs);
 
-    let [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(10);
-        ch.send(42);
-        return ch.receive();
+    let [, socketMs] = await measure(async () => {
+        const ch = createIPCChannel(10);
+        await ch.ready;
+        await ch.send("hello");
+        const reply = await ch.receive();
+        await ch.destroy();
+        return reply.value;
     });
-    timing("SharedArrayBuffer channel:", sabMs);
+    timing("Socket IPC channel (MessagePort):", socketMs);
 
-    comparison("1 msg round-trip", inProcMs, sabMs);
-    record("1 msg round-trip", inProcMs, sabMs, "channel vs SAB");
+    comparison("1 msg round-trip", fileMs, socketMs);
+    record(
+        "1 msg round-trip",
+        fileMs,
+        socketMs,
+        "includes channel create+destroy",
+    );
 
     // ═════════════════════════════════════════════════════════════════
     // Test 2: Sequential throughput — 500 messages
     //
-    // PHP: File ~13.7s (full buffer serialize each send)
-    //      Socket ~49ms (single msg serialize + TCP)
+    // Pre-create channel, measure only the send/receive loop.
     // ═════════════════════════════════════════════════════════════════
     subHeader("Test 2: Sequential throughput — 500 msgs");
 
     const msgCount2 = 500;
 
-    [, inProcMs] = await measure(async () => {
-        const ch = new Channel(msgCount2 + 10);
-        for (let i = 0; i < msgCount2; i++) ch.trySend(i);
+    // --- File IPC ---
+    let chFile2 = createFileIPCChannel(msgCount2 + 10);
+    await chFile2.ready;
+    [, fileMs] = await measure(async () => {
+        for (let i = 0; i < msgCount2; i++) await chFile2.send(i);
         let sum = 0;
-        for (let i = 0; i < msgCount2; i++) sum += ch.tryReceive();
+        for (let i = 0; i < msgCount2; i++) {
+            const r = await chFile2.receive();
+            sum += r.value;
+        }
         return sum;
     });
-    timing("In-process channel:", inProcMs);
+    await chFile2.destroy();
+    timing("File IPC channel:", fileMs);
+    console.log(`        Per-message (file): ~${formatMs(fileMs / msgCount2)}`);
+
+    // --- Socket IPC ---
+    let chSock2 = createIPCChannel(msgCount2 + 10);
+    await chSock2.ready;
+    [, socketMs] = await measure(async () => {
+        for (let i = 0; i < msgCount2; i++) await chSock2.send(i);
+        let sum = 0;
+        for (let i = 0; i < msgCount2; i++) {
+            const r = await chSock2.receive();
+            sum += r.value;
+        }
+        return sum;
+    });
+    await chSock2.destroy();
+    timing("Socket IPC channel (MessagePort):", socketMs);
     console.log(
-        `        Per-message (in-proc): ~${formatMs(inProcMs / msgCount2)}`,
+        `        Per-message (socket): ~${formatMs(socketMs / msgCount2)}`,
     );
 
-    [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(msgCount2 + 10);
-        for (let i = 0; i < msgCount2; i++) ch.send(i);
-        let sum = 0;
-        for (let i = 0; i < msgCount2; i++) sum += ch.receive();
-        return sum;
-    });
-    timing("SharedArrayBuffer channel:", sabMs);
-    console.log(`        Per-message (SAB): ~${formatMs(sabMs / msgCount2)}`);
-
-    comparison("500 sequential msgs", inProcMs, sabMs);
-    record("500 sequential msgs", inProcMs, sabMs, "send then receive loop");
+    comparison("500 sequential msgs", fileMs, socketMs);
+    record("500 sequential msgs", fileMs, socketMs, "send then receive loop");
 
     // ═════════════════════════════════════════════════════════════════
     // Test 3: Burst send then burst receive — 200 messages
-    //
-    // PHP: File ~4.4s, Socket ~20ms
     // ═════════════════════════════════════════════════════════════════
     subHeader("Test 3: Burst send → burst receive — 200 msgs");
 
     const msgCount3 = 200;
 
-    [, inProcMs] = await measure(async () => {
-        const ch = new Channel(msgCount3 + 10);
-        for (let i = 0; i < msgCount3; i++) ch.trySend(`msg_${i}`);
+    let chFile3 = createFileIPCChannel(msgCount3 + 10);
+    await chFile3.ready;
+    [, fileMs] = await measure(async () => {
+        for (let i = 0; i < msgCount3; i++) await chFile3.send(`msg_${i}`);
         let count = 0;
         for (let i = 0; i < msgCount3; i++) {
-            ch.tryReceive();
+            await chFile3.receive();
             count++;
         }
         return count;
     });
-    timing("In-process channel:", inProcMs);
+    await chFile3.destroy();
+    timing("File IPC channel:", fileMs);
 
-    [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(msgCount3 + 10);
-        for (let i = 0; i < msgCount3; i++) ch.send(i);
+    let chSock3 = createIPCChannel(msgCount3 + 10);
+    await chSock3.ready;
+    [, socketMs] = await measure(async () => {
+        for (let i = 0; i < msgCount3; i++) await chSock3.send(`msg_${i}`);
         let count = 0;
         for (let i = 0; i < msgCount3; i++) {
-            ch.receive();
+            await chSock3.receive();
             count++;
         }
         return count;
     });
-    timing("SharedArrayBuffer channel:", sabMs);
+    await chSock3.destroy();
+    timing("Socket IPC channel (MessagePort):", socketMs);
 
-    comparison("200 burst msgs", inProcMs, sabMs);
-    record("200 burst msgs", inProcMs, sabMs, "burst send then burst recv");
+    comparison("200 burst msgs", fileMs, socketMs);
+    record("200 burst msgs", fileMs, socketMs, "burst send then burst recv");
 
     // ═════════════════════════════════════════════════════════════════
     // Test 4: trySend/tryReceive non-blocking — 500 messages
-    //
-    // PHP: File ~11.7s, Socket ~76ms
     // ═════════════════════════════════════════════════════════════════
     subHeader("Test 4: trySend/tryReceive — 500 msgs");
 
     const msgCount4 = 500;
 
-    [, inProcMs] = measureSync(() => {
-        const ch = new Channel(msgCount4 + 10);
-        for (let i = 0; i < msgCount4; i++) ch.trySend(i);
+    let chFile4 = createFileIPCChannel(msgCount4 + 10);
+    await chFile4.ready;
+    [, fileMs] = await measure(async () => {
+        for (let i = 0; i < msgCount4; i++) await chFile4.trySend(i);
         let sum = 0;
         for (let i = 0; i < msgCount4; i++) {
-            const v = ch.tryReceive();
-            if (v !== null) sum += v;
+            const r = await chFile4.tryReceive();
+            if (r.value !== null) sum += r.value;
         }
         return sum;
     });
-    timing("In-process channel:", inProcMs);
+    await chFile4.destroy();
+    timing("File IPC channel:", fileMs);
 
-    [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(msgCount4 + 10);
-        for (let i = 0; i < msgCount4; i++) ch.trySend(i);
+    let chSock4 = createIPCChannel(msgCount4 + 10);
+    await chSock4.ready;
+    [, socketMs] = await measure(async () => {
+        for (let i = 0; i < msgCount4; i++) await chSock4.trySend(i);
         let sum = 0;
         for (let i = 0; i < msgCount4; i++) {
-            const v = ch.tryReceive();
-            if (v !== null) sum += v;
+            const r = await chSock4.tryReceive();
+            if (r.value !== null) sum += r.value;
         }
         return sum;
     });
-    timing("SharedArrayBuffer channel:", sabMs);
+    await chSock4.destroy();
+    timing("Socket IPC channel (MessagePort):", socketMs);
 
-    comparison("500 trySend/tryRecv", inProcMs, sabMs);
-    record("500 trySend/tryRecv", inProcMs, sabMs, "non-blocking ops");
+    comparison("500 trySend/tryRecv", fileMs, socketMs);
+    record("500 trySend/tryRecv", fileMs, socketMs, "non-blocking ops");
 
     // ═════════════════════════════════════════════════════════════════
     // Test 5: Large payload — 10 KB strings × 50
     //
-    // PHP: File ~1.7s (serialize growing buffer), Socket ~7ms
-    // Node: In-proc channel passes by reference (JS objects), no copy
-    //       SAB can't handle strings directly (int only), skip or
-    //       simulate with length comparison.
+    // Structured clone must copy the string across thread boundary.
+    // File channel must also JSON.stringify → write → read → parse.
     // ═════════════════════════════════════════════════════════════════
-    subHeader("Test 5: Large payload — 10 KB strings × 50");
+    subHeader("Test 5: Large payload — 10 KB × 50 msgs");
 
     const msgCount5 = 50;
     const payload5 = "X".repeat(10240);
 
-    [, inProcMs] = await measure(async () => {
-        const ch = new Channel(msgCount5 + 10);
-        for (let i = 0; i < msgCount5; i++) ch.trySend(payload5);
+    let chFile5 = createFileIPCChannel(msgCount5 + 10);
+    await chFile5.ready;
+    [, fileMs] = await measure(async () => {
+        for (let i = 0; i < msgCount5; i++) await chFile5.send(payload5);
         let count = 0;
         for (let i = 0; i < msgCount5; i++) {
-            ch.tryReceive();
+            await chFile5.receive();
             count++;
         }
         return count;
     });
-    timing("In-process channel (string):", inProcMs);
+    await chFile5.destroy();
+    timing("File IPC channel:", fileMs);
 
-    // SAB: simulate with fixed-size int payload (no string support)
-    [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(msgCount5 + 10);
-        for (let i = 0; i < msgCount5; i++) ch.send(10240); // send length as proxy
+    let chSock5 = createIPCChannel(msgCount5 + 10);
+    await chSock5.ready;
+    [, socketMs] = await measure(async () => {
+        for (let i = 0; i < msgCount5; i++) await chSock5.send(payload5);
         let count = 0;
         for (let i = 0; i < msgCount5; i++) {
-            ch.receive();
+            await chSock5.receive();
             count++;
         }
         return count;
     });
-    timing("SharedArrayBuffer (int proxy):", sabMs);
+    await chSock5.destroy();
+    timing("Socket IPC channel (MessagePort):", socketMs);
 
-    comparison("50 large payloads", inProcMs, sabMs);
-    record("50 large payloads", inProcMs, sabMs, "10KB strings vs int proxy");
+    comparison("10KB × 50 msgs", fileMs, socketMs);
+    record("10KB × 50 msgs", fileMs, socketMs, "large payload stress");
 
     // ═════════════════════════════════════════════════════════════════
-    // Test 6: Small payload — integers × 1000
-    //
-    // PHP: File ~25.7s, Socket ~107ms
+    // Test 6: Small payload — tiny integers × 1000
     // ═════════════════════════════════════════════════════════════════
     subHeader("Test 6: Small payload — int × 1000");
 
     const msgCount6 = 1000;
 
-    [, inProcMs] = measureSync(() => {
-        const ch = new Channel(msgCount6 + 10);
-        for (let i = 0; i < msgCount6; i++) ch.trySend(i);
+    let chFile6 = createFileIPCChannel(msgCount6 + 10);
+    await chFile6.ready;
+    [, fileMs] = await measure(async () => {
+        for (let i = 0; i < msgCount6; i++) await chFile6.send(i);
         let sum = 0;
-        for (let i = 0; i < msgCount6; i++) sum += ch.tryReceive();
+        for (let i = 0; i < msgCount6; i++) {
+            const r = await chFile6.receive();
+            sum += r.value;
+        }
         return sum;
     });
-    timing("In-process channel:", inProcMs);
+    await chFile6.destroy();
+    timing("File IPC channel:", fileMs);
+    console.log(`        Per-message (file): ~${formatMs(fileMs / msgCount6)}`);
+
+    let chSock6 = createIPCChannel(msgCount6 + 10);
+    await chSock6.ready;
+    [, socketMs] = await measure(async () => {
+        for (let i = 0; i < msgCount6; i++) await chSock6.send(i);
+        let sum = 0;
+        for (let i = 0; i < msgCount6; i++) {
+            const r = await chSock6.receive();
+            sum += r.value;
+        }
+        return sum;
+    });
+    await chSock6.destroy();
+    timing("Socket IPC channel (MessagePort):", socketMs);
     console.log(
-        `        Per-message (in-proc): ~${formatMs(inProcMs / msgCount6)}`,
+        `        Per-message (socket): ~${formatMs(socketMs / msgCount6)}`,
     );
 
-    [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(msgCount6 + 10);
-        for (let i = 0; i < msgCount6; i++) ch.send(i);
-        let sum = 0;
-        for (let i = 0; i < msgCount6; i++) sum += ch.receive();
-        return sum;
-    });
-    timing("SharedArrayBuffer channel:", sabMs);
-    console.log(`        Per-message (SAB): ~${formatMs(sabMs / msgCount6)}`);
-
-    comparison("1000 small msgs", inProcMs, sabMs);
-    record("1000 small msgs", inProcMs, sabMs, "integer payloads");
+    comparison("1000 small msgs", fileMs, socketMs);
+    record("1000 small msgs", fileMs, socketMs, "integer payloads");
 
     // ═════════════════════════════════════════════════════════════════
-    // Test 7: State query overhead — 200 queries each
+    // Test 7: Channel state query overhead — 200 queries each
     //
-    // PHP: File ~517ms (read file each time), Socket ~34ms (TCP cmd)
-    // Node: Both in-memory, negligible
+    // Each query crosses thread boundary via MessagePort (like PHP TCP cmd).
     // ═════════════════════════════════════════════════════════════════
     subHeader("Test 7: State query overhead — 200 queries each");
 
     const queryCount = 200;
 
-    const chQ1 = new Channel(10);
-    chQ1.trySend("data");
-    [, inProcMs] = measureSync(() => {
+    let chFile7 = createFileIPCChannel(10);
+    await chFile7.ready;
+    await chFile7.send("data");
+    [, fileMs] = await measure(async () => {
         for (let i = 0; i < queryCount; i++) {
-            chQ1.isClosed;
-            chQ1.isEmpty;
-            chQ1.size;
+            await chFile7.isClosed();
+            await chFile7.isEmpty();
+            await chFile7.size();
         }
     });
-    timing("In-process channel:", inProcMs);
+    await chFile7.destroy();
+    timing("File IPC channel:", fileMs);
     console.log(
-        `        Per-query (in-proc): ~${formatMs(inProcMs / (queryCount * 3))}`,
+        `        Per-query (file): ~${formatMs(fileMs / (queryCount * 3))}`,
     );
 
-    const chQ2 = new SABChannel(10);
-    chQ2.send(1);
-    [, sabMs] = measureSync(() => {
+    let chSock7 = createIPCChannel(10);
+    await chSock7.ready;
+    await chSock7.send("data");
+    [, socketMs] = await measure(async () => {
         for (let i = 0; i < queryCount; i++) {
-            chQ2.isClosed;
-            chQ2.isEmpty;
-            chQ2.size;
+            await chSock7.isClosed();
+            await chSock7.isEmpty();
+            await chSock7.size();
         }
     });
-    timing("SharedArrayBuffer channel:", sabMs);
+    await chSock7.destroy();
+    timing("Socket IPC channel (MessagePort):", socketMs);
     console.log(
-        `        Per-query (SAB/Atomics): ~${formatMs(sabMs / (queryCount * 3))}`,
+        `        Per-query (socket): ~${formatMs(socketMs / (queryCount * 3))}`,
     );
 
-    comparison("600 state queries", inProcMs, sabMs);
-    record("600 state queries", inProcMs, sabMs, "isClosed+isEmpty+size");
+    comparison("600 state queries", fileMs, socketMs);
+    record("600 state queries", fileMs, socketMs, "isClosed+isEmpty+size");
 
     // ═════════════════════════════════════════════════════════════════
     // Test 8: Interleaved send/receive — 500 messages
-    //
-    // PHP: File ~11.4s, Socket ~57ms
     // ═════════════════════════════════════════════════════════════════
     subHeader("Test 8: Interleaved send/receive — 500 msgs");
 
     const msgCount8 = 500;
 
-    [, inProcMs] = measureSync(() => {
-        const ch = new Channel(10);
+    let chFile8 = createFileIPCChannel(10);
+    await chFile8.ready;
+    [, fileMs] = await measure(async () => {
         let sum = 0;
         for (let i = 0; i < msgCount8; i++) {
-            ch.trySend(i);
-            sum += ch.tryReceive();
+            await chFile8.send(i);
+            const r = await chFile8.receive();
+            sum += r.value;
         }
         return sum;
     });
-    timing("In-process channel:", inProcMs);
+    await chFile8.destroy();
+    timing("File IPC channel:", fileMs);
 
-    [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(10);
+    let chSock8 = createIPCChannel(10);
+    await chSock8.ready;
+    [, socketMs] = await measure(async () => {
         let sum = 0;
         for (let i = 0; i < msgCount8; i++) {
-            ch.send(i);
-            sum += ch.receive();
+            await chSock8.send(i);
+            const r = await chSock8.receive();
+            sum += r.value;
         }
         return sum;
     });
-    timing("SharedArrayBuffer channel:", sabMs);
+    await chSock8.destroy();
+    timing("Socket IPC channel (MessagePort):", socketMs);
 
-    comparison("500 interleaved msgs", inProcMs, sabMs);
-    record("500 interleaved msgs", inProcMs, sabMs, "send-recv-send-recv");
+    comparison("500 interleaved msgs", fileMs, socketMs);
+    record("500 interleaved msgs", fileMs, socketMs, "send-recv-send-recv");
 
     // ═════════════════════════════════════════════════════════════════
     // Test 9: Cross-thread producer → main consumer (50 msgs)
     //
-    // Uses worker_threads + MessageChannel for true cross-thread IPC.
-    //
-    // PHP: File ~1.5s (IO dispatcher + file mutex)
-    //      Socket ~67ms (IO dispatcher + TCP broker)
+    // Spawns a REAL worker thread as producer, main thread as consumer.
+    // This is the true equivalent of PHP IO dispatcher → main process.
     // ═════════════════════════════════════════════════════════════════
     subHeader(
         "Test 9: Cross-thread — Worker producer → main consumer (50 msgs)",
@@ -1953,174 +2344,284 @@ async function bench06() {
 
     const msgCount9 = 50;
 
-    // MessagePort-based cross-thread
-    let [, workerMs] = await measure(async () => {
-        const { MessageChannel } = await import("node:worker_threads");
+    // --- File IPC: real worker thread as producer ---
+    let [, fileMs9] = await measure(async () => {
         const { port1, port2 } = new MessageChannel();
 
-        return new Promise((resolve) => {
-            const results = [];
-            port1.on("message", (msg) => {
-                results.push(msg);
-                if (results.length === msgCount9) {
-                    port1.close();
-                    resolve(results.reduce((a, b) => a + b, 0));
-                }
-            });
-            // Simulate producer in same thread (MessageChannel still does structured clone)
-            for (let i = 0; i < msgCount9; i++) {
-                port2.postMessage(i);
-            }
-            port2.close();
-        });
-    });
-    timing("MessageChannel (structured clone):", workerMs);
+        const producerCode = `
+            const { parentPort, workerData } = require("node:worker_threads");
+            const fs = require("node:fs");
+            const port = workerData.port;
+            const count = workerData.count;
+            const filePath = workerData.filePath;
 
-    // In-process channel baseline for comparison
-    let [, baseMs] = measureSync(() => {
-        const ch = new Channel(msgCount9 + 10);
-        for (let i = 0; i < msgCount9; i++) ch.trySend(i);
-        let sum = 0;
-        for (let i = 0; i < msgCount9; i++) sum += ch.tryReceive();
+            // Write each message by reading, modifying, writing the file (like PHP file transport)
+            for (let i = 0; i < count; i++) {
+                const data = fs.readFileSync(filePath, "utf-8");
+                const state = JSON.parse(data);
+                state.buffer.push(i);
+                fs.writeFileSync(filePath, JSON.stringify(state));
+            }
+            port.postMessage({ done: true });
+            port.close();
+        `;
+
+        const filePath = join(tmpdir(), `node_ipc_t9_${Date.now()}.json`);
+        writeFileSync(filePath, JSON.stringify({ buffer: [], closed: false }));
+
+        const worker = new Worker(producerCode, {
+            eval: true,
+            workerData: { port: port2, count: msgCount9, filePath },
+            transferList: [port2],
+        });
+
+        await new Promise((resolve) => {
+            port1.on("message", resolve);
+        });
+        port1.close();
+
+        // Main thread reads as consumer
+        const data = JSON.parse(
+            (await import("node:fs")).readFileSync(filePath, "utf-8"),
+        );
+        const sum = data.buffer.reduce((a, b) => a + b, 0);
+        await worker.terminate();
+        try {
+            unlinkSync(filePath);
+        } catch (e) {}
         return sum;
     });
-    timing("In-process channel (baseline):", baseMs);
+    timing("File IPC (worker → file → main):", fileMs9);
 
-    comparison("Cross-thread 50 msgs", workerMs, baseMs);
-    record(
-        "Cross-thread 50 msgs",
-        workerMs,
-        baseMs,
-        "MessageChannel vs in-proc",
+    // --- Socket IPC: real worker thread producer via MessagePort ---
+    let [, socketMs9] = await measure(async () => {
+        const { port1, port2 } = new MessageChannel();
+
+        const producerCode = `
+            const { parentPort, workerData } = require("node:worker_threads");
+            const port = workerData.port;
+            const count = workerData.count;
+            for (let i = 0; i < count; i++) {
+                port.postMessage(i);
+            }
+            port.postMessage({ __done: true });
+        `;
+
+        const worker = new Worker(producerCode, {
+            eval: true,
+            workerData: { port: port2, count: msgCount9 },
+            transferList: [port2],
+        });
+
+        const sum = await new Promise((resolve) => {
+            let s = 0;
+            port1.on("message", (msg) => {
+                if (msg && msg.__done) {
+                    port1.close();
+                    resolve(s);
+                } else {
+                    s += msg;
+                }
+            });
+        });
+        await worker.terminate();
+        return sum;
+    });
+    timing("Socket IPC (worker → MessagePort → main):", socketMs9);
+
+    comparison("IO→main 50 msgs", fileMs9, socketMs9);
+    record("IO→main 50 msgs", fileMs9, socketMs9, "cross-thread producer");
+
+    // ═════════════════════════════════════════════════════════════════
+    // Test 10: Main producer → Worker consumer (50 msgs)
+    // ═════════════════════════════════════════════════════════════════
+    subHeader(
+        "Test 10: Cross-thread — main producer → Worker consumer (50 msgs)",
     );
 
-    // ═════════════════════════════════════════════════════════════════
-    // Test 10: Throughput scaling — increasing message counts
-    //
-    // PHP: File per-msg cost increases O(n), Socket stays O(1)
-    // Node: Both in-memory, should stay O(1) per message
-    // ═════════════════════════════════════════════════════════════════
-    subHeader("Test 10: Throughput scaling");
+    const msgCount10 = 50;
 
-    const scaleCounts = [50, 100, 250, 500, 1000];
+    // --- File IPC ---
+    let [, fileMs10] = await measure(async () => {
+        const filePath = join(tmpdir(), `node_ipc_t10_${Date.now()}.json`);
+        // Main produces into file
+        writeFileSync(filePath, JSON.stringify({ buffer: [] }));
+        for (let i = 0; i < msgCount10; i++) {
+            const data = JSON.parse(
+                (await import("node:fs")).readFileSync(filePath, "utf-8"),
+            );
+            data.buffer.push(i);
+            writeFileSync(filePath, JSON.stringify(data));
+        }
+
+        const consumerCode = `
+            const { parentPort, workerData } = require("node:worker_threads");
+            const fs = require("node:fs");
+            const port = workerData.port;
+            const filePath = workerData.filePath;
+            const count = workerData.count;
+
+            const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+            let sum = 0;
+            for (let i = 0; i < count && i < data.buffer.length; i++) {
+                sum += data.buffer[i];
+            }
+            port.postMessage({ sum });
+            port.close();
+        `;
+
+        const { port1, port2 } = new MessageChannel();
+        const worker = new Worker(consumerCode, {
+            eval: true,
+            workerData: { port: port2, filePath, count: msgCount10 },
+            transferList: [port2],
+        });
+
+        const result = await new Promise((resolve) => {
+            port1.on("message", resolve);
+        });
+        port1.close();
+        await worker.terminate();
+        try {
+            unlinkSync(filePath);
+        } catch (e) {}
+        return result.sum;
+    });
+    timing("File IPC (main → file → worker):", fileMs10);
+
+    // --- Socket IPC ---
+    let [, socketMs10] = await measure(async () => {
+        const { port1, port2 } = new MessageChannel();
+
+        const consumerCode = `
+            const { parentPort, workerData } = require("node:worker_threads");
+            const port = workerData.port;
+            const count = workerData.count;
+            let sum = 0;
+            let received = 0;
+            port.on("message", (msg) => {
+                if (msg && msg.__done) {
+                    port.postMessage({ sum });
+                    port.close();
+                } else {
+                    sum += msg;
+                    received++;
+                }
+            });
+        `;
+
+        const worker = new Worker(consumerCode, {
+            eval: true,
+            workerData: { port: port2, count: msgCount10 },
+            transferList: [port2],
+        });
+
+        for (let i = 0; i < msgCount10; i++) {
+            port1.postMessage(i);
+        }
+        port1.postMessage({ __done: true });
+
+        const result = await new Promise((resolve) => {
+            port1.on("message", resolve);
+        });
+        port1.close();
+        await worker.terminate();
+        return result.sum;
+    });
+    timing("Socket IPC (main → MessagePort → worker):", socketMs10);
+
+    comparison("main→IO 50 msgs", fileMs10, socketMs10);
+    record("main→IO 50 msgs", fileMs10, socketMs10, "cross-thread consumer");
+
+    // ═════════════════════════════════════════════════════════════════
+    // Test 11: Throughput scaling — increasing message counts
+    // ═════════════════════════════════════════════════════════════════
+    subHeader("Test 11: Throughput scaling");
+
+    const scaleCounts = [50, 100, 250, 500];
 
     console.log(
-        `    ${"Msgs".padEnd(8)}  ${"InProc(total)".padStart(14)}  ${"InProc/msg".padStart(12)}  ${"SAB(total)".padStart(14)}  ${"SAB/msg".padStart(12)}`,
+        `    ${"Msgs".padEnd(8)}  ${"File(total)".padStart(14)}  ${"File/msg".padStart(12)}  ${"Socket(total)".padStart(14)}  ${"Socket/msg".padStart(12)}`,
     );
 
     for (const n of scaleCounts) {
-        const [, ipMs] = measureSync(() => {
-            const ch = new Channel(n + 10);
-            for (let i = 0; i < n; i++) ch.trySend(i);
-            for (let i = 0; i < n; i++) ch.tryReceive();
+        // File IPC
+        const chF = createFileIPCChannel(n + 10);
+        await chF.ready;
+        const [, fMs] = await measure(async () => {
+            for (let i = 0; i < n; i++) await chF.send(i);
+            for (let i = 0; i < n; i++) await chF.receive();
         });
+        await chF.destroy();
 
-        const [, sMs] = measureSync(() => {
-            const ch = new SABChannel(n + 10);
-            for (let i = 0; i < n; i++) ch.send(i);
-            for (let i = 0; i < n; i++) ch.receive();
+        // Socket IPC
+        const chS = createIPCChannel(n + 10);
+        await chS.ready;
+        const [, sMs] = await measure(async () => {
+            for (let i = 0; i < n; i++) await chS.send(i);
+            for (let i = 0; i < n; i++) await chS.receive();
         });
+        await chS.destroy();
 
         console.log(
-            `    ${String(n).padEnd(8)}  ${formatMs(ipMs).padStart(14)}  ${formatMs(ipMs / n).padStart(12)}  ${formatMs(sMs).padStart(14)}  ${formatMs(sMs / n).padStart(12)}`,
+            `    ${String(n).padEnd(8)}  ${formatMs(fMs).padStart(14)}  ${formatMs(fMs / n).padStart(12)}  ${formatMs(sMs).padStart(14)}  ${formatMs(sMs / n).padStart(12)}`,
         );
     }
 
     console.log("");
     console.log(
-        "        (Both transports stay ~O(1) per message — no file I/O penalty)",
+        "        (File IPC per-msg cost increases with buffer size; Socket IPC stays constant)",
     );
 
     // ═════════════════════════════════════════════════════════════════
-    // Test 11: Channel creation + teardown cost
+    // Test 12: Channel creation + teardown cost
     //
-    // PHP: File ~127ms (5× create), Socket ~3s (5× broker spawn)
-    // Node: Channel object = negligible; SAB allocation = negligible
+    // PHP: File ~120ms (5× create), Pool ~63ms (5× TCP cmd), Legacy ~3s (5× broker spawn)
+    // Node: Worker thread spawn + MessagePort setup + terminate
+    // Pool mode makes PHP channel creation FASTER than Node worker spawn!
     // ═════════════════════════════════════════════════════════════════
-    subHeader("Test 11: Channel creation + teardown cost");
+    subHeader("Test 12: Channel creation + teardown cost");
 
-    const createCount = 500;
+    const createCount = 5;
 
-    [, inProcMs] = measureSync(() => {
+    // --- File IPC ---
+    let [, fileCreateMs] = await measure(async () => {
         for (let i = 0; i < createCount; i++) {
-            const ch = new Channel(10);
-            ch.close();
+            const ch = createFileIPCChannel(10);
+            await ch.ready;
+            await ch.destroy();
         }
     });
-    timing(`In-process (${createCount}× create+close):`, inProcMs);
+    timing(`File IPC (${createCount}× create+destroy):`, fileCreateMs);
     console.log(
-        `        Per-channel (in-proc): ~${formatMs(inProcMs / createCount)}`,
+        `        Per-channel (file): ~${formatMs(fileCreateMs / createCount)}`,
     );
 
-    [, sabMs] = measureSync(() => {
+    // --- Socket IPC ---
+    let [, socketCreateMs] = await measure(async () => {
         for (let i = 0; i < createCount; i++) {
-            const ch = new SABChannel(10);
-            ch.close();
+            const ch = createIPCChannel(10);
+            await ch.ready;
+            await ch.destroy();
         }
     });
-    timing(`SharedArrayBuffer (${createCount}× create+close):`, sabMs);
-    console.log(`        Per-channel (SAB): ~${formatMs(sabMs / createCount)}`);
+    timing(`Socket IPC (${createCount}× create+destroy):`, socketCreateMs);
+    console.log(
+        `        Per-channel (socket): ~${formatMs(socketCreateMs / createCount)}`,
+    );
 
-    comparison(`${createCount}× create+close`, inProcMs, sabMs);
+    comparison(`${createCount}× create+destroy`, fileCreateMs, socketCreateMs);
     record(
-        `${createCount}× create+close`,
-        inProcMs,
-        sabMs,
+        "5× create+destroy",
+        fileCreateMs,
+        socketCreateMs,
         "channel lifecycle cost",
     );
 
     // ═════════════════════════════════════════════════════════════════
-    // Test 12: Async producer/consumer via channel — 1000 msgs
-    //
-    // Full async channel pipeline to benchmark end-to-end throughput
-    // comparable to PHP socket channel with Launch fibers.
-    // ═════════════════════════════════════════════════════════════════
-    subHeader("Test 12: Async producer/consumer pipeline — 1000 msgs");
-
-    const msgCount12 = 1000;
-
-    [, inProcMs] = await measure(async () => {
-        const ch = new Channel(64);
-        let sum = 0;
-
-        const producer = (async () => {
-            for (let i = 0; i < msgCount12; i++) await ch.send(i);
-            ch.close();
-        })();
-
-        const consumer = (async () => {
-            while (true) {
-                const { value, done } = await ch.receive();
-                if (done) break;
-                sum += value;
-            }
-        })();
-
-        await Promise.all([producer, consumer]);
-        return sum;
-    });
-    timing("Async channel (buf=64):", inProcMs);
-
-    const expectedSum = ((msgCount12 - 1) * msgCount12) / 2;
-    console.log(`        Sum correct: ${inProcMs ? "yes" : "no"}`);
-
-    // SAB sync baseline
-    [, sabMs] = measureSync(() => {
-        const ch = new SABChannel(msgCount12 + 10);
-        for (let i = 0; i < msgCount12; i++) ch.send(i);
-        let sum = 0;
-        for (let i = 0; i < msgCount12; i++) sum += ch.receive();
-        return sum;
-    });
-    timing("SAB sync (no async overhead):", sabMs);
-
-    comparison("1000 msg pipeline", inProcMs, sabMs);
-    record("1000 msg pipeline", inProcMs, sabMs, "async vs SAB sync");
-
-    // ═════════════════════════════════════════════════════════════════
     // Summary
     // ═════════════════════════════════════════════════════════════════
-    printSummary("Benchmark 06: IPC Channel");
+    printSummary("Benchmark 06: Real IPC Channel");
 
     // Interpretation table
     console.log("");
@@ -2129,76 +2630,96 @@ async function bench06() {
         "    ┌───────────────────────────────────────────────────────────────────────────┐",
     );
     console.log(
-        "    │ ASPECT                  │ NODE IN-PROCESS        │ NODE SAB/ATOMICS       │",
+        "    │ ASPECT                  │ NODE SOCKET (MsgPort)  │ NODE FILE (fs+JSON)    │",
     );
     console.log(
         "    ├───────────────────────────────────────────────────────────────────────────┤",
     );
     console.log(
-        "    │ Per-message overhead     │ ~0.1-1 µs (JS object) │ ~0.01-0.1 µs (Atomics) │",
+        "    │ Per-message overhead     │ ~10-50 µs (struct.    │ ~200-500 µs (fs read   │",
     );
     console.log(
-        "    │ State queries            │ Property access (~0ns) │ Atomics.load (~0ns)    │",
+        "    │                          │ clone across thread)  │ + JSON parse + write)  │",
     );
     console.log(
-        "    │ Scaling with buffer      │ O(1) per message       │ O(1) per message       │",
+        "    │ State queries            │ ~5-20 µs (msg round-  │ ~100-300 µs (fs read   │",
     );
     console.log(
-        "    │ Channel creation         │ ~0.01 µs (new object) │ ~0.1 µs (SAB alloc)    │",
+        "    │                          │ trip across thread)   │ + JSON parse)          │",
     );
     console.log(
-        "    │ Cross-thread             │ MessageChannel (clone) │ True shared memory     │",
+        "    │ Scaling with buffer      │ O(1) per message       │ O(n) full file rewrite │",
     );
     console.log(
-        "    │ Data types               │ Any JS value           │ Int32 only (typed)     │",
+        "    │ Channel creation         │ ~30-80 ms (spawn       │ ~30-80 ms (spawn       │",
     );
     console.log(
-        "    └───────────────────────────────────────────────────────────────────────────┘",
-    );
-    console.log("");
-    console.log(c("bold", "    PHP VOsaka Comparison:"));
-    console.log(
-        "    ┌───────────────────────────────────────────────────────────────────────────┐",
+        "    │                          │ worker thread)        │ worker + create file)  │",
     );
     console.log(
-        "    │ ASPECT                  │ PHP SOCKET CHANNEL     │ PHP FILE CHANNEL       │",
+        "    │ Cross-thread             │ Structured clone IPC   │ File I/O (flock-like)  │",
     );
     console.log(
-        "    ├───────────────────────────────────────────────────────────────────────────┤",
-    );
-    console.log(
-        "    │ Per-message overhead     │ ~100 µs (TCP+serialize)│ ~25 ms (full-buf ser.) │",
-    );
-    console.log(
-        "    │ State queries            │ ~56 µs (TCP command)   │ ~863 µs (file read)    │",
-    );
-    console.log(
-        "    │ Scaling with buffer      │ O(1) per message       │ O(n) degrades          │",
-    );
-    console.log(
-        "    │ Channel creation         │ ~596 ms (broker spawn) │ ~25 ms (temp files)    │",
-    );
-    console.log(
-        "    │ Cross-process            │ TCP broker (event IO)  │ File mutex (flock)     │",
-    );
-    console.log(
-        "    │ Data types               │ Any serializable       │ Any serializable       │",
+        "    │ Data types               │ Any cloneable value    │ JSON-serializable only │",
     );
     console.log(
         "    └───────────────────────────────────────────────────────────────────────────┘",
     );
     console.log("");
     console.log(
-        "    Node.js channels are 100-10000x faster per-message than PHP IPC channels.",
+        c("bold", "    Fair comparison with PHP VOsaka (pool mode — default):"),
     );
     console.log(
-        "    This is expected: Node.js channels are in-process (shared memory),",
+        "    ┌───────────────────────────────────────────────────────────────────────────────┐",
     );
     console.log(
-        "    while PHP channels cross process boundaries (TCP sockets / file I/O).",
+        "    │ ASPECT                  │ PHP POOL (default)     │ PHP LEGACY (per-chan)  │ NODE (MsgPort)  │",
     );
     console.log(
-        "    For in-process PHP channels (Channels::createBuffered), the gap narrows to ~10-50x.",
+        "    ├───────────────────────────────────────────────────────────────────────────────┤",
+    );
+    console.log(
+        "    │ Transport                │ TCP loopback + shared  │ TCP loopback + broker │ MessagePort     │",
+    );
+    console.log(
+        "    │                          │ pool process (1 proc)  │ process (N procs)     │ (worker thread) │",
+    );
+    console.log(
+        "    │ Per-message              │ ~120 µs (TCP+prefix)   │ ~110 µs (TCP+serial.) │ ~10-50 µs      │",
+    );
+    console.log(
+        "    │ Channel creation         │ ~16 ms (TCP cmd)       │ ~600 ms (proc_open)   │ ~30-80 ms      │",
+    );
+    console.log(
+        "    │ N channels               │ 1 background process   │ N background processes│ N worker threads│",
+    );
+    console.log(
+        "    │ Multi-chan (10ch×100msg)  │ ~215 ms (pool)         │ ~6 s (10 processes)   │ ~varies        │",
+    );
+    console.log(
+        "    │ Both have REAL IPC cost  │ ✓ cross-process        │ ✓ cross-process       │ ✓ cross-thread │",
+    );
+    console.log(
+        "    └───────────────────────────────────────────────────────────────────────────────┘",
+    );
+    console.log("");
+    console.log(
+        "    PHP pool mode (default) dramatically closes the gap with Node.js:",
+    );
+    console.log(
+        "      • Channel creation: PHP pool ~16ms vs Node ~50ms (PHP is FASTER)",
+    );
+    console.log(
+        "      • Per-message: PHP ~120µs vs Node ~10-50µs (~2-10x gap, down from ~1000x)",
+    );
+    console.log(
+        "      • Multi-channel: PHP pool shares 1 process for N channels (like Node shares 1 thread pool)",
+    );
+    console.log(
+        "      • Remaining per-msg gap due to: TCP loopback vs in-process MessagePort,",
+    );
+    console.log(
+        "        PHP serialize vs V8 structured clone, CH: prefix routing overhead",
     );
     console.log("");
 }

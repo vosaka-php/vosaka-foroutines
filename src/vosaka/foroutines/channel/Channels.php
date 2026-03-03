@@ -10,10 +10,15 @@ use Exception;
 final class Channels
 {
     /**
-     * Create a new inter-process channel (socket-based transport).
+     * Create a new inter-process channel.
      *
-     * This is the **primary, simplified** factory method. It spawns a
-     * ChannelBroker background process and returns an owner Channel.
+     * This is the **primary, simplified** factory method. By default it
+     * uses a shared ChannelBrokerPool process — all channels created via
+     * this method share a single background process instead of spawning
+     * one per channel. The pool is lazily booted on the first call.
+     *
+     * If pool mode has been disabled via Channel::disablePool(), a
+     * dedicated per-channel broker process is spawned instead.
      *
      * Usage:
      *   $ch = Channels::create(5);   // buffered, capacity 5
@@ -123,6 +128,106 @@ final class Channels
             $readTimeout,
             $idleTimeout,
         );
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Pool mode — one background process for many channels
+    // ═════════════════════════════════════════════════════════════════
+
+    /**
+     * Enable pool mode globally (idempotent).
+     *
+     * Pool mode is **enabled by default** — calling this is only needed
+     * after a previous disablePool() call to re-enable it, or to eagerly
+     * boot the pool process before the first Channel::create().
+     *
+     * The pool process is lazily spawned on the first channel creation.
+     *
+     *     // Pool is already enabled by default, so this is optional:
+     *     Channels::enablePool();
+     *
+     *     $ch1 = Channels::create(5);   // auto-boots pool, uses it
+     *     $ch2 = Channels::create(10);  // same pool process
+     *     $ch3 = Channels::create();    // same pool process
+     *
+     * @param float $readTimeout  Read timeout for pool operations (seconds).
+     * @param float $idleTimeout  Pool idle timeout (seconds, 0 = no timeout).
+     */
+    public static function enablePool(
+        float $readTimeout = 30.0,
+        float $idleTimeout = 300.0,
+    ): void {
+        Channel::enablePool($readTimeout, $idleTimeout);
+    }
+
+    /**
+     * Disable pool mode globally.
+     *
+     * After calling this, new Channels::create() / Channel::create()
+     * calls will spawn a dedicated broker process per channel (the
+     * original behavior). Already-created pool channels continue to
+     * work until the pool is shut down via shutdownPool().
+     */
+    public static function disablePool(): void
+    {
+        Channel::disablePool();
+    }
+
+    /**
+     * Check if pool mode is enabled globally.
+     */
+    public static function isPoolEnabled(): bool
+    {
+        return Channel::isPoolEnabled();
+    }
+
+    /**
+     * Get the pool port (if a pool is running).
+     */
+    public static function getPoolPort(): ?int
+    {
+        return Channel::getPoolPort();
+    }
+
+    /**
+     * Shut down the pool process and clean up all pool-hosted channels.
+     *
+     * Pool mode remains enabled after this call — the next
+     * Channels::create() / Channel::create() will lazily boot a fresh
+     * pool process. To also disable pool mode, call disablePool()
+     * afterwards.
+     */
+    public static function shutdownPool(): void
+    {
+        Channel::shutdownPool();
+    }
+
+    /**
+     * Create a channel inside the shared pool process.
+     *
+     * If the pool is not yet running, it is lazily booted.
+     * Unlike create(), this always uses the pool regardless of whether
+     * enablePool() was called.
+     *
+     *     $ch = Channels::createPooled(5);           // buffered, capacity 5
+     *     $ch = Channels::createPooled();             // unbounded
+     *     $ch = Channels::createPooled(0, "my_ch");   // with explicit name
+     *
+     * In a child process (Dispatchers::IO / pcntl_fork), reconnect with:
+     *     $ch->connect();
+     *
+     * @param int    $capacity     Maximum buffer size (0 = unbounded).
+     * @param string $channelName  Optional channel name (auto-generated if empty).
+     * @param float  $readTimeout  Read timeout for blocking operations (seconds).
+     * @return Channel A channel backed by the shared pool process.
+     * @throws Exception If the pool cannot be started or the channel cannot be created.
+     */
+    public static function createPooled(
+        int $capacity = 0,
+        string $channelName = "",
+        float $readTimeout = 30.0,
+    ): Channel {
+        return Channel::createPooled($channelName, $capacity, $readTimeout);
     }
 
     /**

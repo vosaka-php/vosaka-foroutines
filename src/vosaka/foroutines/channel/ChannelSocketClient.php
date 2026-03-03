@@ -110,21 +110,32 @@ final class ChannelSocketClient
     private bool $connected = false;
 
     /**
+     * Whether this client is operating in pool mode.
+     * In pool mode, all channel commands are prefixed with CH:<channelName>:
+     * and sent to a shared ChannelBrokerPool process instead of a dedicated
+     * per-channel broker.
+     */
+    private bool $poolMode = false;
+
+    /**
      * @param string $channelName Channel identifier.
      * @param int    $port        Broker TCP port.
      * @param bool   $isOwner     Whether this instance owns the broker process.
      * @param float  $readTimeout Read timeout for blocking operations (seconds).
+     * @param bool   $poolMode    Whether this client talks to a ChannelBrokerPool.
      */
     public function __construct(
         string $channelName,
         int $port,
         bool $isOwner = false,
         float $readTimeout = 30.0,
+        bool $poolMode = false,
     ) {
         $this->channelName = $channelName;
         $this->port = $port;
         $this->isOwner = $isOwner;
         $this->readTimeout = $readTimeout;
+        $this->poolMode = $poolMode;
     }
 
     // ─── Factory Methods ─────────────────────────────────────────────
@@ -216,6 +227,154 @@ final class ChannelSocketClient
         // Connect to the broker
         $client->connectToBroker();
 
+        return $client;
+    }
+
+    // ─── Pool Mode Factory Methods ───────────────────────────────────
+
+    /**
+     * Spawn a new ChannelBrokerPool background process.
+     *
+     * Unlike createBroker() which spawns one process per channel, this
+     * spawns a single pool process that can host many channels. After
+     * spawning, use createChannelInPool() to register channels.
+     *
+     * @param float $readTimeout  Read timeout for blocking operations (seconds).
+     * @param float $idleTimeout  Pool idle timeout (seconds, 0 = no timeout).
+     * @param float $startTimeout Maximum time to wait for pool startup (seconds).
+     * @return self A connected client that owns the pool process.
+     * @throws Exception If the pool cannot be started.
+     */
+    public static function createPool(
+        float $readTimeout = 30.0,
+        float $idleTimeout = 300.0,
+        float $startTimeout = 10.0,
+    ): self {
+        $poolScript =
+            __DIR__ . DIRECTORY_SEPARATOR . "channel_broker_pool_process.php";
+
+        if (!is_file($poolScript)) {
+            throw new Exception(
+                "ChannelSocketClient: channel_broker_pool_process.php not found at {$poolScript}",
+            );
+        }
+
+        $command = [PHP_BINARY, $poolScript, (string) $idleTimeout];
+
+        $descriptors = [
+            0 => ["pipe", "r"], // STDIN — kept open as heartbeat
+            1 => ["pipe", "w"], // STDOUT — for READY signal
+            2 => ["pipe", "w"], // STDERR — debugging
+        ];
+
+        $process = proc_open($command, $descriptors, $pipes);
+
+        if (!is_resource($process)) {
+            throw new Exception(
+                "ChannelSocketClient: Failed to spawn broker pool process",
+            );
+        }
+
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        $port = self::waitForBrokerReady($pipes[1], $startTimeout);
+
+        if ($port === null) {
+            $stderr = @stream_get_contents($pipes[2]);
+            @fclose($pipes[0]);
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            proc_terminate($process, 9);
+            @proc_close($process);
+
+            $errMsg =
+                $stderr !== false && $stderr !== ""
+                    ? " Stderr: " . trim($stderr)
+                    : "";
+            throw new Exception(
+                "ChannelSocketClient: Broker pool failed to start within {$startTimeout}s.{$errMsg}",
+            );
+        }
+
+        // Use a placeholder channel name for the pool-owner client.
+        // The real channel names are set per-operation via pool protocol.
+        $client = new self("__pool_owner__", $port, true, $readTimeout, true);
+        $client->brokerProcess = $process;
+        $client->brokerPipes = $pipes;
+
+        $client->connectToBroker();
+
+        return $client;
+    }
+
+    /**
+     * Create a new channel inside an already-running pool and return
+     * a ChannelSocketClient bound to that channel.
+     *
+     * This method is called on a pool-owner (or any pool-connected) client.
+     * It sends the CREATE_CHANNEL command, then returns a NEW client
+     * instance that is scoped to the created channel.
+     *
+     * @param string $channelName Unique channel identifier.
+     * @param int    $capacity    Maximum buffer size (0 = unbounded).
+     * @return self A connected client scoped to the new channel (not the pool owner).
+     * @throws Exception If creation fails.
+     */
+    public function createChannelInPool(
+        string $channelName,
+        int $capacity = 0,
+    ): self {
+        $this->ensureConnected();
+
+        $this->sendLine("CREATE_CHANNEL:{$channelName}:{$capacity}");
+        $response = $this->readLine($this->readTimeout);
+
+        if ($response !== null && str_starts_with($response, "CREATED:")) {
+            $port = (int) substr($response, 8);
+
+            // Create a new client instance scoped to this channel
+            $client = new self(
+                $channelName,
+                $port,
+                false,
+                $this->readTimeout,
+                true,
+            );
+            $client->connectToBroker();
+
+            return $client;
+        }
+
+        if ($response !== null && str_starts_with($response, "ERROR:")) {
+            throw new Exception(
+                "ChannelSocketClient::createChannelInPool() failed: " .
+                    substr($response, 6),
+            );
+        }
+
+        throw new Exception(
+            "ChannelSocketClient::createChannelInPool() unexpected response: " .
+                ($response ?? "null/timeout"),
+        );
+    }
+
+    /**
+     * Connect to an existing channel in a pool by port number.
+     *
+     * @param string $channelName Channel name within the pool.
+     * @param int    $port        Pool TCP port.
+     * @param float  $readTimeout Read timeout for blocking operations.
+     * @return self A connected client in pool mode (not the owner).
+     * @throws Exception If the connection fails.
+     */
+    public static function connectToPool(
+        string $channelName,
+        int $port,
+        float $readTimeout = 30.0,
+    ): self {
+        $client = new self($channelName, $port, false, $readTimeout, true);
+        $client->connectToBroker();
         return $client;
     }
 
@@ -392,7 +551,7 @@ final class ChannelSocketClient
         $this->ensureConnected();
 
         $payload = base64_encode(serialize($value));
-        $this->sendLine("SEND:" . $payload);
+        $this->sendLine($this->prefixCommand("SEND:" . $payload));
 
         $response = $this->readLine($this->readTimeout);
 
@@ -402,6 +561,15 @@ final class ChannelSocketClient
 
         if ($response === "CLOSED") {
             throw new Exception("Channel is closed");
+        }
+
+        if (
+            $response !== null &&
+            str_starts_with($response, "NO_SUCH_CHANNEL:")
+        ) {
+            throw new Exception(
+                "Channel '{$this->channelName}' does not exist in the pool",
+            );
         }
 
         throw new Exception(
@@ -424,7 +592,7 @@ final class ChannelSocketClient
     {
         $this->ensureConnected();
 
-        $this->sendLine("RECV");
+        $this->sendLine($this->prefixCommand("RECV"));
 
         $response = $this->readLine($this->readTimeout);
 
@@ -447,6 +615,15 @@ final class ChannelSocketClient
             throw new Exception("Channel is closed");
         }
 
+        if (
+            $response !== null &&
+            str_starts_with($response, "NO_SUCH_CHANNEL:")
+        ) {
+            throw new Exception(
+                "Channel '{$this->channelName}' does not exist in the pool",
+            );
+        }
+
         throw new Exception(
             "ChannelSocketClient::receive() unexpected response: " .
                 ($response ?? "null/timeout"),
@@ -464,7 +641,7 @@ final class ChannelSocketClient
         $this->ensureConnected();
 
         $payload = base64_encode(serialize($value));
-        $this->sendLine("TRY_SEND:" . $payload);
+        $this->sendLine($this->prefixCommand("TRY_SEND:" . $payload));
 
         $response = $this->readLine(5.0);
 
@@ -488,7 +665,7 @@ final class ChannelSocketClient
     {
         $this->ensureConnected();
 
-        $this->sendLine("TRY_RECV");
+        $this->sendLine($this->prefixCommand("TRY_RECV"));
 
         $response = $this->readLine(5.0);
 
@@ -501,7 +678,7 @@ final class ChannelSocketClient
             return unserialize($decoded);
         }
 
-        // EMPTY, CLOSED_EMPTY, CLOSED, or timeout — all return null
+        // EMPTY, CLOSED_EMPTY, CLOSED, NO_SUCH_CHANNEL, or timeout — all return null
         return null;
     }
 
@@ -517,7 +694,7 @@ final class ChannelSocketClient
             return;
         }
 
-        $this->sendLine("CLOSE");
+        $this->sendLine($this->prefixCommand("CLOSE"));
 
         // Read the response (OK)
         $this->readLine(5.0);
@@ -532,7 +709,7 @@ final class ChannelSocketClient
             return true;
         }
 
-        $this->sendLine("IS_CLOSED");
+        $this->sendLine($this->prefixCommand("IS_CLOSED"));
         $response = $this->readLine(5.0);
 
         return $response === "TRUE";
@@ -547,7 +724,7 @@ final class ChannelSocketClient
             return true;
         }
 
-        $this->sendLine("IS_EMPTY");
+        $this->sendLine($this->prefixCommand("IS_EMPTY"));
         $response = $this->readLine(5.0);
 
         return $response === "TRUE";
@@ -562,7 +739,7 @@ final class ChannelSocketClient
             return false;
         }
 
-        $this->sendLine("IS_FULL");
+        $this->sendLine($this->prefixCommand("IS_FULL"));
         $response = $this->readLine(5.0);
 
         return $response === "TRUE";
@@ -577,7 +754,7 @@ final class ChannelSocketClient
             return 0;
         }
 
-        $this->sendLine("SIZE");
+        $this->sendLine($this->prefixCommand("SIZE"));
         $response = $this->readLine(5.0);
 
         if ($response !== null && str_starts_with($response, "SIZE:")) {
@@ -601,12 +778,13 @@ final class ChannelSocketClient
                 "closed" => true,
                 "inter_process" => true,
                 "channel_name" => $this->channelName,
-                "transport" => "socket",
+                "transport" => $this->poolMode ? "socket_pool" : "socket",
                 "connected" => false,
+                "pool_mode" => $this->poolMode,
             ];
         }
 
-        $this->sendLine("INFO");
+        $this->sendLine($this->prefixCommand("INFO"));
         $response = $this->readLine(5.0);
 
         if ($response !== null && str_starts_with($response, "INFO:")) {
@@ -640,10 +818,18 @@ final class ChannelSocketClient
      */
     public function shutdown(): void
     {
-        // Send SHUTDOWN command to broker
+        // Send SHUTDOWN command to broker (or POOL_SHUTDOWN for pool mode owner)
         if ($this->isConnected()) {
             try {
-                $this->sendLine("SHUTDOWN");
+                if ($this->poolMode && $this->isOwner) {
+                    // Pool owner: shut down the entire pool process
+                    $this->sendLine("POOL_SHUTDOWN");
+                } elseif ($this->poolMode) {
+                    // Pool non-owner: just close the channel, don't kill pool
+                    $this->sendLine($this->prefixCommand("SHUTDOWN"));
+                } else {
+                    $this->sendLine("SHUTDOWN");
+                }
                 // Read the OK response (best-effort)
                 $this->readLine(2.0);
             } catch (\Throwable) {
@@ -654,7 +840,7 @@ final class ChannelSocketClient
         // Close our connection
         $this->disconnect();
 
-        // Wait for broker process to exit (owner only)
+        // Wait for broker/pool process to exit (owner only)
         if (
             $this->brokerProcess !== null &&
             is_resource($this->brokerProcess)
@@ -692,6 +878,26 @@ final class ChannelSocketClient
             @proc_close($this->brokerProcess);
             $this->brokerProcess = null;
         }
+    }
+
+    /**
+     * Shutdown the pool process (pool-owner only).
+     *
+     * Unlike shutdown() which handles per-channel cleanup, this method
+     * explicitly sends POOL_SHUTDOWN to terminate the entire pool process
+     * and all channels it manages.
+     *
+     * @throws Exception If not connected.
+     */
+    public function shutdownPool(): void
+    {
+        if (!$this->poolMode) {
+            throw new Exception(
+                "ChannelSocketClient::shutdownPool() can only be called in pool mode",
+            );
+        }
+
+        $this->shutdown();
     }
 
     /**
@@ -733,7 +939,30 @@ final class ChannelSocketClient
         return $this->isOwner;
     }
 
+    /**
+     * Check if this client is operating in pool mode.
+     */
+    public function isPoolMode(): bool
+    {
+        return $this->poolMode;
+    }
+
     // ─── Low-level Communication ─────────────────────────────────────
+
+    /**
+     * Prefix a command with CH:<channelName>: when in pool mode.
+     * In non-pool mode, the command is returned as-is.
+     *
+     * @param string $command The raw command (e.g. "SEND:payload", "RECV").
+     * @return string The possibly-prefixed command.
+     */
+    private function prefixCommand(string $command): string
+    {
+        if ($this->poolMode) {
+            return "CH:" . $this->channelName . ":" . $command;
+        }
+        return $command;
+    }
 
     /**
      * Send a line to the broker.
@@ -906,6 +1135,8 @@ final class ChannelSocketClient
     public function __destruct()
     {
         if ($this->isOwner) {
+            // Pool owners only shut down the pool if they own the process.
+            // Non-owner pool clients just disconnect.
             $this->shutdown();
         } else {
             $this->disconnect();

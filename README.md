@@ -34,19 +34,22 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Channel (3 transports)                 │   │
-│  │  IN-PROCESS: fiber ←→ fiber (in-memory array buffer)     │   │
-│  │  SOCKET IPC: Channel::create() → ChannelBroker (TCP)     │   │
-│  │              $ch->connect() in child (auto-reconnect)    │   │
-│  │  FILE IPC:   newInterProcess() → temp file + Mutex       │   │
+│  │                    Channel (4 transports)                 │   │
+│  │  IN-PROCESS:  fiber ←→ fiber (in-memory array buffer)    │   │
+│  │  SOCKET POOL: Channel::create() → ChannelBrokerPool      │   │
+│  │               N channels share 1 background process       │   │
+│  │               (default — lazily booted on first create)   │   │
+│  │  SOCKET IPC:  newSocketInterProcess() → ChannelBroker     │   │
+│  │               1 process per channel (legacy, opt-in)      │   │
+│  │  FILE IPC:    newInterProcess() → temp file + Mutex       │   │
 │  │  + Channels utils: merge, map, filter, zip, range, timer │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐    │
-│  │  Flow (cold) │  │ SharedFlow / │  │  ChannelBroker       │    │
-│  │  + buffer()  │  │ StateFlow    │  │  (background TCP     │    │
-│  │  operator    │  │ (hot, back-  │  │   server for IPC     │    │
-│  │              │  │  pressure)   │  │   channels)          │    │
+│  │  Flow (cold) │  │ SharedFlow / │  │  ChannelBrokerPool   │    │
+│  │  + buffer()  │  │ StateFlow    │  │  (single TCP server  │    │
+│  │  operator    │  │ (hot, back-  │  │   hosting N channels │    │
+│  │              │  │  pressure)   │  │   in one process)    │    │
 │  └─────────────┘  └─────────────┘  └──────────────────────┘    │
 │                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐    │
@@ -66,12 +69,14 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 - Job lifecycle management (cancel, join, invokeOnCompletion)
 
 ### Communication & Streams
-- **`Channel`** — three transport modes:
+- **`Channel`** — four transport modes:
   - **In-process** (`Channel::new()`) — fiber-to-fiber via in-memory buffer
-  - **Inter-process / socket** (`Channel::create()`) — background TCP broker with event-driven I/O (recommended for IPC)
+  - **Inter-process / socket pool** (`Channel::create()`) — shared `ChannelBrokerPool` process hosting N channels (default, recommended)
+  - **Inter-process / socket** (`Channel::newSocketInterProcess()`) — dedicated per-channel `ChannelBroker` process (legacy, opt-in via `Channel::disablePool()`)
   - **Inter-process / file** (`Channel::newInterProcess()`) — temp file + mutex
+- **Pool mode enabled by default** — `Channel::create()` lazily boots a single `ChannelBrokerPool` process; all channels share it (N channels → 1 process)
 - `Channel` is serializable — works with `SerializableClosure` on Windows
-- `Channel::create()` + `$ch->connect()` for seamless child-process reconnection
+- `Channel::create()` + `$ch->connect()` for seamless child-process reconnection (pool-aware with `PING`/`POOL_PONG` probe)
 - **`Channels`** utility: `merge`, `map`, `filter`, `take`, `zip`, `range`, `timer`, `from`
 - **`ChannelIterator`** — `foreach` support on any Channel
 - `Flow` API: cold Flow, `SharedFlow`, `StateFlow`, `MutableStateFlow`
@@ -210,13 +215,16 @@ $job->cancelAfter(2.0); // cancel after 2 seconds
 
 ### Channel
 
-Channel supports three transport modes:
+Channel supports four transport modes:
 
 | Mode | Factory | Use Case |
 |---|---|---|
 | **In-process** | `Channel::new(capacity)` | Fibers in the same process |
-| **Inter-process (socket)** | `Channel::create(capacity)` | Multiple OS processes via TCP broker (recommended) |
+| **Inter-process (socket pool)** | `Channel::create(capacity)` | Multiple OS processes via shared `ChannelBrokerPool` (default, recommended) |
+| **Inter-process (socket)** | `Channel::newSocketInterProcess(name, capacity)` | Dedicated per-channel broker (legacy — opt-in via `Channel::disablePool()`) |
 | **Inter-process (file)** | `Channel::newInterProcess(name, capacity)` | Multiple OS processes via temp file + mutex |
+
+> **Pool mode is enabled by default.** `Channel::create()` lazily boots a single `ChannelBrokerPool` background process and creates all channels inside it. N channels = 1 process. Call `Channel::disablePool()` to revert to the legacy per-channel broker behavior.
 
 #### In-process Channel (fibers only)
 
@@ -233,9 +241,9 @@ var_dump($ch->receive()); // "world"
 $ch->close();
 ```
 
-#### Inter-process Channel (socket transport — recommended)
+#### Inter-process Channel (socket pool — default, recommended)
 
-`Channel::create()` spawns a background `ChannelBroker` process that manages an in-memory buffer over TCP loopback. Child processes reconnect with `$ch->connect()` — no arguments needed.
+`Channel::create()` uses a shared `ChannelBrokerPool` process that hosts multiple channels in a single background process over TCP loopback. The pool is lazily booted on the first `create()` call. Child processes reconnect with `$ch->connect()` — no arguments needed.
 
 ```php
 use vosaka\foroutines\channel\Channel;
@@ -243,29 +251,77 @@ use vosaka\foroutines\{RunBlocking, Launch, Async, Dispatchers, Thread};
 use function vosaka\foroutines\main;
 
 main(function () {
-    // Create a socket-based inter-process channel
-    $ch = Channel::create(5);          // buffered, capacity 5
-    // $ch = Channel::create();        // unbounded (no capacity limit)
+    // Pool is enabled by default — all channels share one process
+    $ch1 = Channel::create(5);         // buffered, capacity 5 (boots pool)
+    $ch2 = Channel::create(10);        // same pool process
+    $ch3 = Channel::create();          // unbounded, same pool process
 
-    RunBlocking::new(function () use ($ch) {
+    RunBlocking::new(function () use ($ch1) {
         // Send from IO dispatcher (child process)
-        Launch::new(function () use ($ch) {
-            $ch->connect();            // reconnect in child — no args needed
-            $ch->send('from child 1');
-            $ch->send('from child 2');
+        Launch::new(function () use ($ch1) {
+            $ch1->connect();           // reconnect in child — pool-aware
+            $ch1->send('from child 1');
+            $ch1->send('from child 2');
         }, Dispatchers::IO);
 
         // Receive in parent
-        Launch::new(function () use ($ch) {
-            var_dump($ch->receive());  // "from child 1"
-            var_dump($ch->receive());  // "from child 2"
+        Launch::new(function () use ($ch1) {
+            var_dump($ch1->receive()); // "from child 1"
+            var_dump($ch1->receive()); // "from child 2"
         });
 
         Thread::await();
-        $ch->close();
-        $ch->cleanup();
+        $ch1->close();
+        $ch1->cleanup();
     });
+
+    // Pool is automatically shut down at script exit
+    // Or manually: Channel::shutdownPool();
 });
+```
+
+#### Pool Management API
+
+```php
+use vosaka\foroutines\channel\Channel;
+use vosaka\foroutines\channel\Channels;
+
+// Pool is enabled by default — these are optional:
+Channel::enablePool();              // idempotent; eagerly boot pool
+Channel::isPoolEnabled();           // true
+Channel::getPoolPort();             // pool TCP port (or null if not booted)
+
+// Create channels — all share the same pool process
+$ch1 = Channel::create(5);
+$ch2 = Channel::create(10);
+$ch3 = Channel::createPooled('my_channel', 5); // explicit name
+
+// Disable pool mode — future create() calls spawn per-channel brokers
+Channel::disablePool();
+$legacy = Channel::create(5);       // uses dedicated ChannelBroker process
+
+// Re-enable pool mode
+Channel::enablePool();
+
+// Shut down the pool process (all pool-hosted channels are closed)
+Channel::shutdownPool();            // pool remains enabled; next create() reboots it
+
+// Facade via Channels utility class
+Channels::enablePool();
+Channels::createPooled(5, 'named_ch');
+Channels::shutdownPool();
+```
+
+#### Legacy per-channel broker (opt-in)
+
+If you need the original one-process-per-channel behavior, disable pool mode:
+
+```php
+Channel::disablePool();
+
+$ch = Channel::create(5);             // spawns a dedicated ChannelBroker process
+// Or use the explicit factory:
+$ch = Channel::newSocketInterProcess('my_channel', 5);
 ```
 
 #### trySend / tryReceive (non-blocking)
@@ -337,6 +393,34 @@ $ticks = Channels::timer(500, maxTicks: 10); // sends microtime every 500ms
 
 #### Socket Transport Architecture
 
+**Pool mode (default)** — N channels share 1 process:
+
+```
+Parent Process                      ChannelBrokerPool (background)
+──────────────                      ──────────────────────────────
+Channel::create(5)                  Single TCP server on 127.0.0.1
+  └─ boots pool (lazy) ─────────►  listen(0) → ephemeral port
+  ← READY:<port>                    │
+  └─ CREATE_CHANNEL:ch1:5 ──────►  ┌──────────────────────────┐
+  ← CREATED:<port>                  │  ch1: in-memory buffer   │
+                                    │  ch2: in-memory buffer   │
+Channel::create(10)                 │  ch3: in-memory buffer   │
+  └─ CREATE_CHANNEL:ch2:10 ─────►  │  ...N channels           │
+  ← CREATED:<port>                  └──────────────────────────┘
+                                           ▲
+  CH:ch1:SEND:data ─── TCP ──────►         │
+  CH:ch1:RECV       ◄── TCP ──────         │
+                                           │
+Child Process (fork / IO)                  │
+──────────────────────────                 │
+$ch->connect()  ─── TCP ──────────────────┘
+  └─ PING → POOL_PONG (auto-detect pool)
+  └─ reconnects by cached port + pool mode
+  CH:ch1:SEND:data ─── TCP ──────►
+```
+
+**Legacy mode** (per-channel broker — opt-in via `Channel::disablePool()`):
+
 ```
 Parent Process                      ChannelBroker (background)
 ──────────────                      ──────────────────────────
@@ -357,11 +441,12 @@ $ch->connect()  ─── TCP ───────────┘
   send('world') ─── TCP ──────────►
 ```
 
-| Transport | Overhead | Serialization | Blocking I/O | Windows |
-|---|---|---|---|---|
-| Socket (broker) | Low (~TCP loopback) | Not needed (in-memory buffer) | Event-driven (no spin-wait) | ✅ |
-| File (mutex) | Higher (file I/O + mutex) | Full buffer on every op | Spin-wait polling | ✅ |
-| In-process | Lowest (array) | N/A | Fiber suspend/resume | ✅ |
+| Transport | Overhead | Processes | Serialization | Blocking I/O | Windows |
+|---|---|---|---|---|---|
+| Socket pool (default) | Low (~TCP loopback) | 1 process for N channels | Not needed (in-memory) | Event-driven (no spin-wait) | ✅ |
+| Socket (legacy broker) | Low (~TCP loopback) | 1 process per channel | Not needed (in-memory) | Event-driven (no spin-wait) | ✅ |
+| File (mutex) | Higher (file I/O + mutex) | N/A | Full buffer on every op | Spin-wait polling | ✅ |
+| In-process | Lowest (array) | N/A | N/A | Fiber suspend/resume | ✅ |
 
 ### Select
 
@@ -465,28 +550,33 @@ $result = $async->await();
 
 The following features were added to improve real-world async performance, reduce CPU waste, provide production-grade flow control, and enable robust inter-process communication.
 
-### Channel Rewrite — Three Transport Modes
+### Channel Rewrite — Four Transport Modes
 
-The Channel system was completely rewritten for v2 with a clean separation of concerns:
+The Channel system was completely rewritten for v2 with a clean separation of concerns, and further improved with **pool mode** — a single background process hosting multiple channels:
 
 | Class | Responsibility |
 |---|---|
 | `Channel` | Unified public API — delegates to the correct transport |
-| `ChannelBroker` | Background TCP server managing an in-memory buffer for socket transport |
-| `ChannelSocketClient` | TCP client connecting to a ChannelBroker |
+| `ChannelBrokerPool` | **Single TCP server managing N channels in-memory (default)** |
+| `ChannelBroker` | Per-channel TCP server (legacy — used when pool is disabled) |
+| `ChannelSocketClient` | TCP client connecting to a `ChannelBrokerPool` or `ChannelBroker` |
 | `ChannelFileTransport` | File-based transport with Mutex synchronization |
 | `ChannelSerializer` | Multi-backend serialization (serialize, JSON, msgpack, igbinary) |
 | `ChannelIterator` | `foreach` support via `IteratorAggregate` |
 | `Channels` | Utility class with functional operators and factory methods |
 
 **Key improvements over v1:**
-- **`Channel::create()`** — one-line factory that spawns a broker and returns a ready-to-use channel
-- **`$ch->connect()`** — zero-argument reconnection in child processes (port is cached internally)
-- **Serializable channels** — `Channel` implements `__serialize` / `__unserialize` for `SerializableClosure` compatibility
+- **Pool mode by default** — `Channel::create()` lazily boots a shared `ChannelBrokerPool`; N channels share 1 background process instead of N processes
+- **`Channel::create()`** — one-line factory that creates a pool-backed channel (or per-channel broker if pool is disabled)
+- **`Channel::createPooled()`** — explicit pool factory with optional channel name
+- **`Channel::enablePool()` / `disablePool()` / `shutdownPool()`** — global pool lifecycle control
+- **`$ch->connect()`** — zero-argument reconnection in child processes (pool-aware with `PING`/`POOL_PONG` auto-detection)
+- **Serializable channels** — `Channel` implements `__serialize` / `__unserialize` for `SerializableClosure` compatibility; pool mode is preserved across serialization
 - **No port file** — the broker communicates the port via STDOUT (`READY:<port>`), eliminating file-based port discovery
 - **Parent-death detection** — broker monitors STDIN for EOF and shuts down automatically when the parent dies
 - **Idle timeout** — broker auto-shuts down after configurable inactivity (default: 300s)
 - **Multiple serializers** — `serialize` (default), `json`, `msgpack`, `igbinary`
+- **~4–6x faster channel creation** — creating channels inside a pool avoids process spawn overhead
 
 #### Channel API Reference
 
@@ -495,14 +585,31 @@ The Channel system was completely rewritten for v2 with a clean separation of co
 | Method | Returns | Description |
 |---|---|---|
 | `Channel::new(capacity)` | `Channel` | In-process channel (fibers only) |
-| `Channel::create(capacity, readTimeout, idleTimeout)` | `Channel` | Socket-based IPC channel (spawns broker) |
+| `Channel::create(capacity, readTimeout, idleTimeout)` | `Channel` | Pool-backed IPC channel (default) or per-channel broker (if pool disabled) |
+| `Channel::createPooled(name, capacity, readTimeout)` | `Channel` | Explicitly create a pool-backed channel (always uses pool) |
 | `Channel::newInterProcess(name, capacity, serializer)` | `Channel` | File-based IPC channel |
-| `Channel::newSocketInterProcess(name, capacity)` | `Channel` | Socket IPC with explicit name |
+| `Channel::newSocketInterProcess(name, capacity)` | `Channel` | Per-channel broker socket IPC (legacy) |
 | `Channel::connectByName(name)` | `Channel` | Connect to existing file-based channel |
-| `Channel::connectSocketByPort(name, port)` | `Channel` | Connect to existing socket channel by port |
+| `Channel::connectSocketByPort(name, port)` | `Channel` | Connect to existing socket channel by port (auto-detects pool vs broker) |
 | `Channels::create(capacity)` | `Channel` | Facade for `Channel::create()` |
+| `Channels::createPooled(capacity, name)` | `Channel` | Facade for `Channel::createPooled()` |
 | `Channels::createBuffered(capacity)` | `Channel` | Facade for `Channel::new()` with capacity > 0 |
 | `Channels::from(array)` | `Channel` | Pre-filled in-process channel |
+
+**Pool management (static):**
+
+| Method | Returns | Description |
+|---|---|---|
+| `Channel::enablePool(readTimeout, idleTimeout)` | `void` | Enable pool mode globally (default; eagerly boots pool if not running) |
+| `Channel::disablePool()` | `void` | Disable pool mode — future `create()` calls spawn per-channel brokers |
+| `Channel::isPoolEnabled()` | `bool` | Check if pool mode is enabled |
+| `Channel::getPoolPort()` | `?int` | Get the pool TCP port (null if not booted) |
+| `Channel::shutdownPool()` | `void` | Shut down the pool process; pool mode stays enabled for lazy reboot |
+| `Channels::enablePool()` | `void` | Facade for `Channel::enablePool()` |
+| `Channels::disablePool()` | `void` | Facade for `Channel::disablePool()` |
+| `Channels::isPoolEnabled()` | `bool` | Facade for `Channel::isPoolEnabled()` |
+| `Channels::getPoolPort()` | `?int` | Facade for `Channel::getPoolPort()` |
+| `Channels::shutdownPool()` | `void` | Facade for `Channel::shutdownPool()` |
 
 **Instance methods:**
 
@@ -521,8 +628,9 @@ The Channel system was completely rewritten for v2 with a clean separation of co
 | `size()` | `int` | Current buffer size |
 | `getInfo()` | `array` | Detailed channel state info |
 | `getName()` | `?string` | Channel name (IPC channels only) |
-| `getSocketPort()` | `?int` | Broker TCP port (socket transport only) |
-| `getTransport()` | `?string` | `"socket"`, `"file"`, or `null` (in-process) |
+| `getSocketPort()` | `?int` | Broker/pool TCP port (socket transport only) |
+| `getTransport()` | `?string` | `"socket_pool"`, `"socket"`, `"file"`, or `null` (in-process) |
+| `isPoolMode()` | `bool` | Whether this channel uses the shared pool |
 
 **Channels utility operators:**
 
@@ -825,7 +933,8 @@ When all three report no work, the scheduler sleeps briefly — similar to how N
 | Fibers (core) | ✅ | ✅ |
 | AsyncIO (stream_select) | ✅ | ✅ |
 | Channel (in-process) | ✅ | ✅ |
-| Channel (socket transport) | ✅ | ✅ |
+| Channel (socket pool — default) | ✅ | ✅ |
+| Channel (socket per-channel broker) | ✅ | ✅ |
 | Channel (file transport) | ✅ | ✅ |
 | ForkProcess (pcntl_fork) | ✅ | ❌ (fallback to symfony/process) |
 | Process (symfony/process) | ✅ | ✅ |
@@ -845,13 +954,13 @@ When all three report no work, the scheduler sleeps briefly — similar to how N
 | Syntax | `async/await` (language-level) | `AsyncIO::method()->await()` / `Async::new()->await()` (library-level) |
 | Deferred execution | Promises are eager | `AsyncIOOperation` is lazy (deferred until `->await()`) |
 | Flow control | Streams (backpressure built-in) | BackpressureStrategy (SUSPEND/DROP/ERROR) |
-| IPC channels | Worker threads + MessagePort | `Channel::create()` + TCP broker / file transport |
+| IPC channels | Worker threads + MessagePort | `Channel::create()` + shared TCP pool / per-channel broker / file transport |
 
 **Key insight**: PHP's standard library I/O functions are blocking. VOsaka Foroutines works around this by:
 1. Using `stream_select()` for non-blocking socket/stream I/O in `Dispatchers::DEFAULT` via `AsyncIO::method()->await()`
 2. Offloading blocking I/O to child processes via `Dispatchers::IO` (with `pcntl_fork()` or `symfony/process`)
 3. Cooperative multitasking between fibers via `Pause::new()` / `Fiber::suspend()`
-4. `Channel::create()` for zero-config inter-process communication via a background TCP broker
+4. `Channel::create()` for zero-config inter-process communication via a shared `ChannelBrokerPool` (N channels → 1 process)
 
 ## License
 

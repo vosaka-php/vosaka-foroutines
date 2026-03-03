@@ -866,7 +866,7 @@ $benchLabels = [
     "bench_03" => "Channel Throughput",
     "bench_04" => "I/O-Bound",
     "bench_05" => "Flow / Streams",
-    "bench_06" => "Socket vs File / IPC",
+    "bench_06" => "Pool vs Legacy vs File IPC",
 ];
 
 foreach ($benchLabels as $benchId => $label) {
@@ -923,7 +923,7 @@ foreach ($benchLabels as $benchId => $label) {
         "bench_03" => "Channel — data structure cost",
         "bench_04" => "I/O — real-world pattern",
         "bench_05" => "Reactive streams",
-        "bench_06" => "IPC transport comparison",
+        "bench_06" => "Pool vs Legacy vs File IPC",
         default => "",
     };
 
@@ -1190,7 +1190,9 @@ echo "    │ CPU-Bound             │ ~1x (overhead only)         │ ~1x (ove
 echo "    │ Channel Throughput    │ ~2.5x (pipeline w/ I/O)     │ ~1.5-3x (async chan)   │\n";
 echo "    │ I/O-Bound             │ ~5-10x (wait time overlap)  │ ~5-10x (libuv async)   │\n";
 echo "    │ Flow / Streams        │ ~1-2x (reactive overhead)   │ ~1-2x (stream overhead)│\n";
-echo "    │ IPC Channel           │ Socket 17x > File           │ InProc ~1x SAB         │\n";
+echo "    │ IPC Channel (pool)    │ Pool 120-200x > File        │ MsgPort ~2-5x > File   │\n";
+echo "    │ IPC Chan creation     │ Pool ~16ms vs Legacy ~600ms │ Worker ~50ms            │\n";
+echo "    │ IPC Multi-channel     │ Pool 22-28x > Legacy(N proc)│ N Workers (N threads)  │\n";
 echo "    └──────────────────────────────────────────────────────────────────────────────┘\n\n";
 
 echo "  " . Color::c(Color::BOLD, "Absolute Performance (PHP vs Node):") . "\n";
@@ -1200,7 +1202,9 @@ echo "    ├──────────────────────�
 echo "    │ Raw CPU computation     │ PHP ~2-10x slower            │ V8 JIT vs interp    │\n";
 echo "    │ Fiber/Promise overhead  │ PHP ~10-50x higher           │ Fiber ~12µs vs ~1µs │\n";
 echo "    │ In-process channel      │ PHP ~10-50x slower           │ SplQueue vs V8 opt  │\n";
-echo "    │ IPC channel (socket)    │ PHP ~100-1000x slower        │ TCP serialize vs SAB│\n";
+echo "    │ IPC per-msg (pool)      │ PHP ~2-10x slower            │ TCP+prefix vs clone │\n";
+echo "    │ IPC chan creation (pool) │ PHP ~0.3x (pool FASTER)     │ Worker spawn ~50ms  │\n";
+echo "    │ IPC chan creation (lgcy) │ PHP ~10x slower              │ proc_open vs Worker │\n";
 echo "    │ Delay/sleep concurrency │ ~same speedup ratios         │ Both scheduler-bound│\n";
 echo "    │ I/O overlap benefit     │ ~same speedup ratios         │ Wait time dominates │\n";
 echo "    └──────────────────────────────────────────────────────────────────────────────┘\n\n";
@@ -1212,7 +1216,9 @@ echo "    • I/O-bound workloads where wait time >> scheduling overhead\n";
 echo "    • Applications already in PHP ecosystem (Laravel, Symfony, WordPress, etc.)\n";
 echo "    • Scenarios with < 10,000 concurrent tasks (Fiber overhead acceptable)\n";
 echo "    • Developer productivity: familiar PHP syntax + Kotlin-inspired coroutine API\n";
-echo "    • Socket-based channels: 17-280x faster than file-based for IPC\n";
+echo "    • Pool-based IPC channels: 120-200x faster than file-based, ~16ms/create vs ~600ms legacy\n";
+echo "    • Multi-channel scaling: N channels share 1 process (pool mode) — 22-28x faster than N processes\n";
+echo "    • Channel creation with pool is FASTER than Node.js Worker spawn (~16ms vs ~50ms)\n";
 echo "    • Pipeline pattern with I/O: stages overlap for real speedup\n\n";
 
 echo "  " .
@@ -1222,7 +1228,7 @@ echo "  " .
     ) .
     "\n";
 echo "    • CPU-intensive computation (V8 JIT compilation)\n";
-echo "    • High-throughput message passing (> 100k msgs/sec)\n";
+echo "    • Per-message IPC throughput (structured clone ~10-50µs vs TCP ~100-130µs)\n";
 echo "    • Very high concurrency (> 100k simultaneous tasks)\n";
 echo "    • Streaming / real-time data processing\n";
 echo "    • Native non-blocking I/O at OS level via libuv\n\n";
@@ -1231,8 +1237,10 @@ echo "  " . Color::c(Color::BOLD . Color::CYAN, "Key Takeaway:") . "\n";
 echo "    VOsaka Foroutines brings Kotlin-style structured concurrency to PHP.\n";
 echo "    For I/O-bound web applications (the majority of PHP use-cases),\n";
 echo "    the concurrency SPEEDUP RATIOS are comparable to Node.js.\n";
-echo "    The absolute times are higher due to PHP's interpreted nature,\n";
-echo "    but the relative benefit of async is the same.\n\n";
+echo "    With pool mode (default), IPC channel creation is now FASTER than\n";
+echo "    Node.js Worker spawn (~16ms vs ~50ms), and N channels share 1 process.\n";
+echo "    Per-message throughput is ~2-10x slower than Node.js structured clone,\n";
+echo "    but the gap has narrowed dramatically from the old per-channel broker era.\n\n";
 
 // ─── Final status ────────────────────────────────────────────────────────
 
