@@ -2,7 +2,7 @@
     "name": "venndev/vosaka-fourotines",
     "description": "Structured async programming for PHP using Fibers, inspired by Kotlin Coroutines. Features AsyncIO (non-blocking streams), ForkProcess (low-overhead child processes), Flow/SharedFlow/StateFlow with backpressure, Channels, Mutex, and cooperative scheduling. Can integrate with VOsaka.",
     "type": "library",
-    "license": "LGPL-2.1",
+    "license": "LGPL-2.1-only",
     "keywords": [
         "async",
         "fibers",
