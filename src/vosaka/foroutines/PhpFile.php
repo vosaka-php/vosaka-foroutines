@@ -115,7 +115,7 @@ readonly class PhpFile
             //    process (a separate OS process) has time to advance.
             //    Without this the parent spins at ~100% CPU doing
             //    cooperative yields that take microseconds each.
-            Pause::new();
+            Pause::force();
             usleep(5000); // 5ms
         }
 

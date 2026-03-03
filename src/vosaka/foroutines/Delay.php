@@ -72,7 +72,7 @@ final class Delay
         // Fiber path: cooperatively yield on each tick so other fibers
         // can run while this one waits for the delay to elapse.
         while (TimeUtils::elapsedTimeMillis($start) < $ms) {
-            Pause::new();
+            Pause::force();
         }
     }
 }

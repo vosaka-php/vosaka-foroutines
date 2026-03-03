@@ -964,4 +964,4 @@ When all three report no work, the scheduler sleeps briefly — similar to how N
 
 ## License
 
-MIT
+GNU Lesser General Public License v2.1

@@ -41,16 +41,32 @@ final class FiberUtils
         } elseif ($callable instanceof Fiber) {
             return $callable;
         } elseif ($callable instanceof Generator) {
-            return new Fiber(function () use ($callable) {
-                while ($callable->valid()) {
-                    $callable->next();
-                    Pause::new();
-                }
-                return $callable->getReturn();
-            });
+            // Arrow function: lighter than function() use() — no explicit
+            // use-binding array allocation, single-expression body delegates
+            // to a static helper method (fewer opcodes in the closure body).
+            return new Fiber(fn() => self::runGenerator($callable));
         }
 
         return new Fiber($callable);
+    }
+
+    /**
+     * Drive a Generator to completion, cooperatively yielding between steps.
+     *
+     * Extracted as a static method so the Fiber closure body is a single
+     * fn() => self::runGenerator($gen) call — minimal opcodes, and the
+     * actual loop logic lives in a regular method (no per-call allocation).
+     *
+     * @param Generator $generator The generator to run.
+     * @return mixed The generator's return value.
+     */
+    private static function runGenerator(Generator $generator): mixed
+    {
+        while ($generator->valid()) {
+            $generator->next();
+            Pause::new();
+        }
+        return $generator->getReturn();
     }
 
     private static function isFiberCallbackGenerator(callable $callback): bool

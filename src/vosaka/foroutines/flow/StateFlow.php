@@ -10,62 +10,51 @@ use Throwable;
 use vosaka\foroutines\Pause;
 
 /**
- * StateFlow — A hot Flow that always holds a current value and emits
- * updates to registered collectors when the value changes.
+ * StateFlow — A reactive state holder that emits the current value to
+ * new collectors and subsequent updates to all active collectors.
  *
- * StateFlow now supports backpressure for slow collectors via a
- * configurable emission buffer. When collectors cannot keep up with
- * the rate of setValue() / emit() calls, the backpressure strategy
- * determines what happens:
+ * StateFlow conflates by default: if the new value is identical (===)
+ * to the current value, no emission occurs (matching Kotlin semantics).
  *
- *   - SUSPEND:     The emitter fiber yields until collectors catch up.
- *   - DROP_OLDEST: The oldest pending emission is evicted (ring buffer).
- *   - DROP_LATEST: The new emission is silently discarded.
- *   - ERROR:       A RuntimeException is thrown immediately.
- *
- * Buffer architecture:
- *
- *   StateFlow always maintains exactly ONE "current value" (the latest
- *   committed value). In addition, an optional emission buffer absorbs
- *   bursts when collectors are slow:
- *
- *   ┌──────────────────┬──────────────────────────────┐
- *   │  current value   │  emission buffer (N slots)   │
- *   │  (always 1)      │  (extraBufferCapacity)       │
- *   └──────────────────┴──────────────────────────────┘
- *         getValue()          absorbs bursts before
- *         returns this        backpressure kicks in
- *
- *   When extraBufferCapacity is 0 (default), every setValue() dispatches
- *   immediately to collectors (original behaviour, no backpressure).
+ * Backpressure support:
+ *   - extraBufferCapacity controls how many pending emissions can be
+ *     buffered before the backpressure strategy activates.
+ *   - When extraBufferCapacity is 0 (default), emissions are dispatched
+ *     synchronously with no buffering.
  *
  * Usage:
  *
- *     // Simple — no backpressure (original behaviour)
- *     $state = StateFlow::new(0);
+ *     $state = StateFlow::new(initialValue: 0);
+ *     $state->collect(fn($v) => var_dump("State: $v"));
+ *     $state->setValue(1);
+ *     $state->setValue(2);
  *
- *     // With backpressure — buffer up to 16 pending emissions
+ *     // With backpressure:
  *     $state = StateFlow::new(
  *         initialValue: 0,
  *         extraBufferCapacity: 16,
  *         onBufferOverflow: BackpressureStrategy::DROP_OLDEST,
  *     );
  *
- *     $state->collect(function ($value) {
- *         // slow consumer — won't block the emitter
- *         usleep(10000);
- *         echo "Got: {$value}\n";
- *     });
- *
- *     $state->setValue(1);
- *     $state->setValue(2); // buffered if collector is slow
+ * Optimization notes:
+ *   - Collector keys use int auto-increment instead of uniqid() —
+ *     avoids expensive system call + string allocation per collector,
+ *     and keeps the $collectors array as a PHP packed array (faster
+ *     than a hash table with string keys).
+ *   - Suspended emitter entries use indexed arrays [fiber, value]
+ *     instead of associative arrays ["fiber" => ..., "value" => ...]
+ *     to reduce hash table overhead.
  */
 class StateFlow extends BaseFlow
 {
     /**
      * Registered collectors.
      *
-     * @var array<string, array{
+     * Uses int keys (auto-increment) instead of string keys (uniqid)
+     * so that PHP can use a packed array internally — faster lookup
+     * and no string allocation per collector registration.
+     *
+     * @var array<int, array{
      *     callback: callable,
      *     emittedCount: int,
      *     skippedCount: int,
@@ -73,6 +62,13 @@ class StateFlow extends BaseFlow
      * }>
      */
     private array $collectors = [];
+
+    /**
+     * Auto-increment key for collector registration.
+     * Replaces uniqid("sc_", true) — pure int increment is ~100x faster
+     * than uniqid() which calls gettimeofday + generates a string.
+     */
+    private int $nextCollectorId = 0;
 
     /**
      * The current (latest committed) value.
@@ -108,8 +104,8 @@ class StateFlow extends BaseFlow
 
     /**
      * Fibers that are suspended waiting for buffer space (SUSPEND strategy).
-     * Each entry is [fiber => Fiber, value => mixed].
-     * @var array<int, array{fiber: Fiber, value: mixed}>
+     * Each entry is [Fiber, mixed value] (indexed array, not associative).
+     * @var array<int, array{0: Fiber, 1: mixed}>
      */
     private array $suspendedEmitters = [];
 
@@ -271,7 +267,10 @@ class StateFlow extends BaseFlow
      */
     public function collect(callable $collector): void
     {
-        $collectorKey = uniqid("sc_", true);
+        // Int auto-increment — avoids uniqid() syscall + string allocation.
+        // PHP keeps int-keyed arrays as packed arrays when keys are
+        // sequential, which is faster than hash-table-backed string keys.
+        $collectorKey = $this->nextCollectorId++;
         $emittedCount = 0;
         $skippedCount = 0;
 
@@ -324,8 +323,8 @@ class StateFlow extends BaseFlow
     ): static {
         $newFlow = clone $this;
         $newFlow->operators[] = [
-            "type" => "distinctUntilChanged",
-            "compare" => $compareFunction ?? fn($a, $b) => $a === $b,
+            self::OP_DISTINCT,
+            $compareFunction ?? fn($a, $b) => $a === $b,
         ];
         return $newFlow;
     }
@@ -386,8 +385,11 @@ class StateFlow extends BaseFlow
 
     /**
      * Remove a collector by its key.
+     *
+     * Accepts string|int for backward compatibility — older code may
+     * have stored string keys from uniqid(); new code uses int keys.
      */
-    public function removeCollector(string $collectorKey): void
+    public function removeCollector(string|int $collectorKey): void
     {
         unset($this->collectors[$collectorKey]);
     }
@@ -493,12 +495,11 @@ class StateFlow extends BaseFlow
         $fiber = Fiber::getCurrent();
 
         if ($fiber !== null) {
-            // Inside a Fiber — register and suspend
+            // Inside a Fiber — register and suspend.
+            // Uses indexed array [fiber, value] instead of associative
+            // ["fiber" => ..., "value" => ...] to avoid hash table overhead.
             $emitterId = $this->nextEmitterId++;
-            $this->suspendedEmitters[$emitterId] = [
-                "fiber" => $fiber,
-                "value" => $value,
-            ];
+            $this->suspendedEmitters[$emitterId] = [$fiber, $value];
 
             // Suspend — we'll be resumed by resumeSuspendedEmitters()
             // when a collector consumes and frees buffer space.
@@ -513,7 +514,7 @@ class StateFlow extends BaseFlow
         $spins = 0;
 
         while ($this->isBufferFull() && $spins < $maxSpins) {
-            Pause::new(); // no-op outside Fiber, documents intent
+            Pause::force(); // must yield immediately to let collectors drain
             usleep(100); // small real-time sleep to avoid hot spin
             $spins++;
         }
@@ -540,8 +541,9 @@ class StateFlow extends BaseFlow
                 break; // No more space — remaining emitters stay suspended
             }
 
-            $fiber = $entry["fiber"];
-            $value = $entry["value"];
+            // Indexed access: [0] = fiber, [1] = value
+            $fiber = $entry[0];
+            $value = $entry[1];
 
             // Remove from waiting list BEFORE resuming to prevent re-entrancy
             unset($this->suspendedEmitters[$id]);
@@ -563,7 +565,9 @@ class StateFlow extends BaseFlow
     {
         parent::__clone();
         $this->collectors = [];
+        $this->nextCollectorId = 0;
         $this->suspendedEmitters = [];
+        $this->nextEmitterId = 0;
         $this->emissionBuffer = [];
         $this->bufferedCount = 0;
         // currentValue and hasValue are preserved in the clone

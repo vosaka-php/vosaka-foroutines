@@ -78,7 +78,7 @@ final class ForkWorkerManager
             WorkerPoolState::$readBuffers = [];
             WorkerPoolState::$booted = false;
             Launch::$queue = new \SplQueue();
-            Launch::$map = [];
+            Launch::$activeCount = 0;
             AsyncIO::resetState();
             EventLoop::resetState();
 
@@ -250,7 +250,10 @@ final class ForkWorkerManager
             }
 
             $encoded = base64_encode(serialize($result));
-            WorkerPoolCommunication::socketWriteLine($socket, "RESULT:" . $encoded);
+            WorkerPoolCommunication::socketWriteLine(
+                $socket,
+                "RESULT:" . $encoded,
+            );
         } catch (\Throwable $e) {
             $errorData = [
                 "__worker_error__" => true,
@@ -260,7 +263,10 @@ final class ForkWorkerManager
                 "trace" => $e->getTraceAsString(),
             ];
             $encoded = base64_encode(serialize($errorData));
-            WorkerPoolCommunication::socketWriteLine($socket, "ERROR:" . $encoded);
+            WorkerPoolCommunication::socketWriteLine(
+                $socket,
+                "ERROR:" . $encoded,
+            );
         }
 
         // Signal readiness for next task

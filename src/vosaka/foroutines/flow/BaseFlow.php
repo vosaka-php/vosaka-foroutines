@@ -10,10 +10,43 @@ use Throwable;
 use vosaka\foroutines\Pause;
 
 /**
- * Abstract base class for Flow implementations
+ * Abstract base class for Flow implementations.
+ *
+ * Optimization notes:
+ *   - Operator entries use indexed arrays with int type constants instead of
+ *     associative arrays with string keys ("type" => "map", "callback" => ...).
+ *     This avoids hash table allocation per operator entry and enables faster
+ *     int-based switch matching in the hot applyOperators() path.
+ *   - Operator structure: [int $type, mixed ...$args]
+ *       [OP_MAP,            callable $transform]
+ *       [OP_FILTER,         callable $predicate]
+ *       [OP_TAKE,           int $count]
+ *       [OP_SKIP,           int $count]
+ *       [OP_FLAT_MAP,       callable $transform]
+ *       [OP_ON_EACH,        callable $action]
+ *       [OP_CATCH,          callable $handler]
+ *       [OP_ON_COMPLETION,  callable $action]
+ *       [OP_BUFFER,         int $capacity, BackpressureStrategy $strategy]
+ *       [OP_DISTINCT,       callable $compare]
  */
 abstract class BaseFlow implements FlowInterface
 {
+    // ─── Operator type constants ─────────────────────────────────────
+    // Using int constants instead of string keys for operator type
+    // identification. switch/match on int is compiled to a jump table
+    // by the PHP engine — O(1) dispatch vs O(n) string comparison.
+
+    public const OP_MAP = 0;
+    public const OP_FILTER = 1;
+    public const OP_TAKE = 2;
+    public const OP_SKIP = 3;
+    public const OP_FLAT_MAP = 4;
+    public const OP_ON_EACH = 5;
+    public const OP_CATCH = 6;
+    public const OP_ON_COMPLETION = 7;
+    public const OP_BUFFER = 8;
+    public const OP_DISTINCT = 9;
+
     protected array $operators = [];
     protected bool $isCompleted = false;
     protected ?Throwable $exception = null;
@@ -24,7 +57,7 @@ abstract class BaseFlow implements FlowInterface
     public function map(callable $transform): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = ["type" => "map", "callback" => $transform];
+        $newFlow->operators[] = [self::OP_MAP, $transform];
         return $newFlow;
     }
 
@@ -34,7 +67,7 @@ abstract class BaseFlow implements FlowInterface
     public function filter(callable $predicate): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = ["type" => "filter", "callback" => $predicate];
+        $newFlow->operators[] = [self::OP_FILTER, $predicate];
         return $newFlow;
     }
 
@@ -44,7 +77,7 @@ abstract class BaseFlow implements FlowInterface
     public function take(int $count): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = ["type" => "take", "count" => $count];
+        $newFlow->operators[] = [self::OP_TAKE, $count];
         return $newFlow;
     }
 
@@ -54,7 +87,7 @@ abstract class BaseFlow implements FlowInterface
     public function skip(int $count): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = ["type" => "skip", "count" => $count];
+        $newFlow->operators[] = [self::OP_SKIP, $count];
         return $newFlow;
     }
 
@@ -64,7 +97,7 @@ abstract class BaseFlow implements FlowInterface
     public function flatMap(callable $transform): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = ["type" => "flatMap", "callback" => $transform];
+        $newFlow->operators[] = [self::OP_FLAT_MAP, $transform];
         return $newFlow;
     }
 
@@ -74,7 +107,7 @@ abstract class BaseFlow implements FlowInterface
     public function onEach(callable $action): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = ["type" => "onEach", "callback" => $action];
+        $newFlow->operators[] = [self::OP_ON_EACH, $action];
         return $newFlow;
     }
 
@@ -84,7 +117,7 @@ abstract class BaseFlow implements FlowInterface
     public function catch(callable $handler): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = ["type" => "catch", "callback" => $handler];
+        $newFlow->operators[] = [self::OP_CATCH, $handler];
         return $newFlow;
     }
 
@@ -94,10 +127,7 @@ abstract class BaseFlow implements FlowInterface
     public function onCompletion(callable $action): FlowInterface
     {
         $newFlow = clone $this;
-        $newFlow->operators[] = [
-            "type" => "onCompletion",
-            "callback" => $action,
-        ];
+        $newFlow->operators[] = [self::OP_ON_COMPLETION, $action];
         return $newFlow;
     }
 
@@ -147,11 +177,7 @@ abstract class BaseFlow implements FlowInterface
         }
 
         $newFlow = clone $this;
-        $newFlow->operators[] = [
-            "type" => "buffer",
-            "capacity" => $capacity,
-            "strategy" => $onOverflow,
-        ];
+        $newFlow->operators[] = [self::OP_BUFFER, $capacity, $onOverflow];
         return $newFlow;
     }
 
@@ -234,10 +260,16 @@ abstract class BaseFlow implements FlowInterface
     /**
      * Apply operators to a value.
      *
-     * Buffer operators are skipped here — they are handled separately by
-     * the collect() implementation via applyBufferOperator() so that the
-     * buffer can accumulate values and apply backpressure across multiple
-     * emissions (not just a single value pass-through).
+     * Uses int-based switch on operator type constants for O(1) dispatch
+     * instead of string comparison. Buffer operators are skipped here —
+     * they are handled separately by the collect() implementation via
+     * getBufferOperator() so that the buffer can accumulate values and
+     * apply backpressure across multiple emissions.
+     *
+     * Operator layout (indexed array):
+     *   [0] = int type constant (OP_MAP, OP_FILTER, etc.)
+     *   [1] = callable/int (callback or count, depending on type)
+     *   [2] = (optional) extra argument (e.g. BackpressureStrategy for OP_BUFFER)
      */
     protected function applyOperators(
         mixed $value,
@@ -247,46 +279,50 @@ abstract class BaseFlow implements FlowInterface
         $currentValue = $value;
 
         foreach ($this->operators as $operator) {
-            switch ($operator["type"]) {
-                case "map":
-                    $currentValue = $operator["callback"]($currentValue);
+            switch ($operator[0]) {
+                case self::OP_MAP:
+                    $currentValue = $operator[1]($currentValue);
                     break;
 
-                case "filter":
-                    if (!$operator["callback"]($currentValue)) {
+                case self::OP_FILTER:
+                    if (!$operator[1]($currentValue)) {
                         return null; // Filter out this value
                     }
                     break;
 
-                case "take":
-                    if ($emittedCount >= $operator["count"]) {
+                case self::OP_TAKE:
+                    if ($emittedCount >= $operator[1]) {
                         $this->isCompleted = true;
                         return null;
                     }
                     break;
 
-                case "skip":
-                    if ($skippedCount < $operator["count"]) {
+                case self::OP_SKIP:
+                    if ($skippedCount < $operator[1]) {
                         $skippedCount++;
                         return null;
                     }
                     break;
 
-                case "onEach":
-                    $operator["callback"]($currentValue);
+                case self::OP_ON_EACH:
+                    $operator[1]($currentValue);
                     break;
 
-                case "flatMap":
-                    $subFlow = $operator["callback"]($currentValue);
+                case self::OP_FLAT_MAP:
+                    $subFlow = $operator[1]($currentValue);
                     if ($subFlow instanceof BaseFlow) {
                         $currentValue = $subFlow->firstOrNull();
                     }
                     break;
 
-                case "buffer":
+                case self::OP_BUFFER:
                     // Buffer operators are handled at the collect() level,
                     // not per-value. Skip here — see hasBufferOperator()
-                    // and applyBufferOperator().
+                    // and getBufferOperator().
+                    break;
+
+                case self::OP_DISTINCT:
+                    // Handled by subclass-specific collect() logic
                     break;
             }
         }
@@ -302,7 +338,7 @@ abstract class BaseFlow implements FlowInterface
     protected function hasBufferOperator(): bool
     {
         foreach ($this->operators as $op) {
-            if ($op["type"] === "buffer") {
+            if ($op[0] === self::OP_BUFFER) {
                 return true;
             }
         }
@@ -312,12 +348,15 @@ abstract class BaseFlow implements FlowInterface
     /**
      * Get the first buffer operator configuration from the pipeline.
      *
-     * @return array{capacity: int, strategy: BackpressureStrategy}|null
+     * Returns an indexed array [OP_BUFFER, int capacity, BackpressureStrategy]
+     * or null if no buffer operator is present.
+     *
+     * @return array{0: int, 1: int, 2: BackpressureStrategy}|null
      */
     protected function getBufferOperator(): ?array
     {
         foreach ($this->operators as $op) {
-            if ($op["type"] === "buffer") {
+            if ($op[0] === self::OP_BUFFER) {
                 return $op;
             }
         }
@@ -450,7 +489,7 @@ abstract class BaseFlow implements FlowInterface
                 }
 
                 // Yield to let collector fibers run
-                Pause::new();
+                Pause::force();
                 $yields++;
             }
         } else {
@@ -489,8 +528,8 @@ abstract class BaseFlow implements FlowInterface
     protected function executeOnCompletion(?Throwable $exception): void
     {
         foreach ($this->operators as $operator) {
-            if ($operator["type"] === "onCompletion") {
-                $operator["callback"]($exception);
+            if ($operator[0] === self::OP_ON_COMPLETION) {
+                $operator[1]($exception);
             }
         }
     }
@@ -501,9 +540,9 @@ abstract class BaseFlow implements FlowInterface
     protected function wasExceptionHandled(Throwable $exception): bool
     {
         foreach ($this->operators as $operator) {
-            if ($operator["type"] === "catch") {
+            if ($operator[0] === self::OP_CATCH) {
                 try {
-                    $operator["callback"]($exception);
+                    $operator[1]($exception);
                     return true;
                 } catch (Throwable) {
                     continue;

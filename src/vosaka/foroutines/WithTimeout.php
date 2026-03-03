@@ -15,14 +15,16 @@ final class WithTimeout
      * Throws RuntimeException if timeout is exceeded.
      *
      * @param int $timeoutMs Timeout in milliseconds
-     * @param callable $callable The function to execute in Foroutine 
+     * @param callable $callable The function to execute in Foroutine
      * @return mixed Result of the block execution
      * @throws RuntimeException
      */
     public static function new(int $timeoutMs, callable $callable): mixed
     {
         if ($timeoutMs <= 0) {
-            throw new RuntimeException("Timed out immediately waiting for {$timeoutMs} ms");
+            throw new RuntimeException(
+                "Timed out immediately waiting for {$timeoutMs} ms",
+            );
         }
 
         $fiber = new Fiber($callable);
@@ -34,7 +36,9 @@ final class WithTimeout
             while (!$fiber->isTerminated()) {
                 $elapsedTime = TimeUtils::elapsedTimeMillis($startTime);
                 if ($elapsedTime >= $timeoutMs) {
-                    throw new RuntimeException("Timed out waiting for {$timeoutMs} ms");
+                    throw new RuntimeException(
+                        "Timed out waiting for {$timeoutMs} ms",
+                    );
                 }
 
                 try {
@@ -42,10 +46,15 @@ final class WithTimeout
                         $fiber->resume();
                     }
                 } catch (Exception $e) {
-                    throw new RuntimeException("Error during Foroutines execution: " . $e->getMessage(), 0, $e);
+                    throw new RuntimeException(
+                        "Error during Foroutines execution: " .
+                            $e->getMessage(),
+                        0,
+                        $e,
+                    );
                 }
 
-                Pause::new();
+                Pause::force();
             }
 
             return $fiber->getReturn();

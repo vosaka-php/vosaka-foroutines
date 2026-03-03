@@ -107,7 +107,7 @@ final class WorkerPool
         $id = self::add($closure);
         return Async::new(function () use ($id) {
             while (!array_key_exists($id, WorkerPoolState::$returns)) {
-                Pause::new();
+                Pause::force();
             }
             $result = WorkerPoolState::$returns[$id];
             unset(WorkerPoolState::$returns[$id]);

@@ -12,27 +12,95 @@ class Job
 {
     public ?Fiber $fiber = null;
     public ?Job $job = null;
-    private float $startTime;
-    private ?float $endTime = null;
+
+    /**
+     * Start time in nanoseconds (monotonic clock via hrtime).
+     * Using int nanoseconds avoids float zval boxing/unboxing
+     * that microtime(true) would incur on every access.
+     */
+    private int $startTimeNs;
+
+    /**
+     * End time in nanoseconds, or -1 if not yet ended.
+     * Using -1 sentinel instead of ?int avoids nullable zval overhead.
+     */
+    private int $endTimeNs = -1;
+
     private JobState $status;
-    private array $joins = [];
-    private array $invokers = [];
-    private ?float $timeout = null;
+
+    /**
+     * Lazy-initialized join callbacks — null until first onJoin() call.
+     * Avoids allocating an empty array for every Job instance since
+     * most jobs never use onJoin().
+     * @var array<callable>|null
+     */
+    private ?array $joins = null;
+
+    /**
+     * Lazy-initialized invoker callbacks — null until first invokeOnCompletion() call.
+     * Avoids allocating an empty array for every Job instance since
+     * most jobs never use invokeOnCompletion().
+     * @var array<callable>|null
+     */
+    private ?array $invokers = null;
+
+    /**
+     * Timeout in nanoseconds, or null if no timeout is set.
+     */
+    private ?int $timeoutNs = null;
 
     public function __construct(public int $id)
     {
-        $this->startTime = microtime(true);
+        $this->startTimeNs = hrtime(true);
         $this->status = JobState::PENDING;
     }
 
-    public function getStartTime(): float
+    /**
+     * Recycle this Job instance for reuse from an object pool.
+     *
+     * Resets all mutable state to the same values as a freshly constructed
+     * Job, but reuses the existing PHP object allocation. This avoids:
+     *   - Zend object allocation overhead (~0.5-1µs per new object)
+     *   - GC pressure from short-lived Job instances
+     *   - Constructor call overhead (parent::__construct, enum init)
+     *
+     * The fiber reference is set to the new fiber, and the id is updated.
+     * All callbacks (joins, invokers) are cleared, timeout is removed,
+     * and the status is reset to PENDING.
+     *
+     * @param int   $id    New job ID (typically spl_object_id of the new fiber).
+     * @param Fiber $fiber The new fiber to associate with this recycled job.
+     */
+    public function recycleJob(int $id, Fiber $fiber): void
     {
-        return $this->startTime;
+        $this->id = $id;
+        $this->fiber = $fiber;
+        $this->job = null;
+        $this->startTimeNs = hrtime(true);
+        $this->endTimeNs = -1;
+        $this->status = JobState::PENDING;
+        $this->joins = null;
+        $this->invokers = null;
+        $this->timeoutNs = null;
     }
 
+    /**
+     * Returns start time as float seconds for external consumers
+     * that still expect microtime-compatible values.
+     */
+    public function getStartTime(): float
+    {
+        return $this->startTimeNs / 1_000_000_000;
+    }
+
+    /**
+     * Returns end time as float seconds, or null if not yet ended.
+     */
     public function getEndTime(): ?float
     {
-        return $this->endTime;
+        return $this->endTimeNs === -1
+            ? null
+            : $this->endTimeNs / 1_000_000_000;
     }
 
     public function getStatus(): JobState
@@ -47,7 +115,7 @@ class Job
         }
         $this->fiber->start();
         $this->status = JobState::RUNNING;
-        $this->startTime = microtime(true);
+        $this->startTimeNs = hrtime(true);
         return true;
     }
 
@@ -61,7 +129,7 @@ class Job
             throw new RuntimeException("Job must be running to complete it.");
         }
         $this->status = JobState::COMPLETED;
-        $this->endTime = microtime(true);
+        $this->endTimeNs = hrtime(true);
         $this->triggerJoins();
         $this->triggerInvokers();
     }
@@ -81,7 +149,7 @@ class Job
             throw new RuntimeException("Job must be running to fail it.");
         }
         $this->status = JobState::FAILED;
-        $this->endTime = microtime(true);
+        $this->endTimeNs = hrtime(true);
         $this->triggerJoins();
         $this->triggerInvokers();
     }
@@ -97,7 +165,7 @@ class Job
             );
         }
         $this->status = JobState::CANCELLED;
-        $this->endTime = microtime(true);
+        $this->endTimeNs = hrtime(true);
         $this->triggerInvokers();
     }
 
@@ -134,15 +202,19 @@ class Job
             );
         }
 
+        // Lazy init — only allocate array when actually needed
+        $this->joins ??= [];
         $this->joins[] = $callback;
     }
 
     private function triggerJoins(): void
     {
-        foreach ($this->joins as $callback) {
-            $callback($this);
+        if ($this->joins !== null) {
+            foreach ($this->joins as $callback) {
+                $callback($this);
+            }
+            $this->joins = null;
         }
-        $this->joins = [];
     }
 
     public function join(): mixed
@@ -170,7 +242,7 @@ class Job
         try {
             while (FiberUtils::fiberStillRunning($this->fiber)) {
                 $this->fiber->resume();
-                Pause::new();
+                Pause::force();
             }
         } catch (Throwable $e) {
             if (!$this->isFinal()) {
@@ -183,7 +255,11 @@ class Job
             $this->complete();
         }
 
-        return $this->fiber->getReturn();
+        $result = $this->fiber->getReturn();
+        // Release fiber reference early so its memory can be reclaimed
+        // before the Job object itself is garbage-collected.
+        $this->fiber = null;
+        return $result;
     }
 
     public function invokeOnCompletion(callable $callback): void
@@ -194,17 +270,28 @@ class Job
             );
         }
 
+        // Lazy init — only allocate array when actually needed
+        $this->invokers ??= [];
         $this->invokers[] = $callback;
     }
 
     public function triggerInvokers(): void
     {
-        foreach ($this->invokers as $callback) {
-            $callback($this);
+        if ($this->invokers !== null) {
+            foreach ($this->invokers as $callback) {
+                $callback($this);
+            }
+            $this->invokers = null;
         }
-        $this->invokers = [];
     }
 
+    /**
+     * Set a timeout after which the job is considered timed out.
+     * Converts seconds (float) to nanoseconds (int) once at set-time
+     * so that isTimedOut() only performs int arithmetic on the hot path.
+     *
+     * @param float $seconds Timeout duration in seconds.
+     */
     public function cancelAfter(float $seconds): void
     {
         if ($this->isFinal()) {
@@ -212,14 +299,17 @@ class Job
                 "Cannot set timeout for a job that has already completed.",
             );
         }
-        $this->timeout = $seconds;
+        $this->timeoutNs = (int) ($seconds * 1_000_000_000);
     }
 
+    /**
+     * Check whether this job has exceeded its timeout.
+     * Uses hrtime(true) int nanoseconds — pure int comparison,
+     * no float boxing/unboxing on the hot scheduler path.
+     */
     public function isTimedOut(): bool
     {
-        if ($this->timeout === null) {
-            return false;
-        }
-        return microtime(true) - $this->startTime >= $this->timeout;
+        return $this->timeoutNs !== null &&
+            hrtime(true) - $this->startTimeNs >= $this->timeoutNs;
     }
 }

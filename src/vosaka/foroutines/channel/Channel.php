@@ -1057,8 +1057,9 @@ final class Channel implements IteratorAggregate
         }
 
         if (!empty($this->receiveQueue)) {
-            $receiver = array_shift($this->receiveQueue);
-            $receiver["fiber"]->resume($value);
+            // receiveQueue stores bare Fiber objects — no wrapper array needed
+            $fiber = array_shift($this->receiveQueue);
+            $fiber->resume($value);
             return;
         }
 
@@ -1072,10 +1073,9 @@ final class Channel implements IteratorAggregate
             throw new Exception("send() must be called from within a Fiber");
         }
 
-        $this->sendQueue[] = [
-            "fiber" => $currentFiber,
-            "value" => $value,
-        ];
+        // Indexed array [fiber, value] instead of associative
+        // ["fiber" => ..., "value" => ...] — avoids hash table overhead
+        $this->sendQueue[] = [$currentFiber, $value];
 
         Fiber::suspend();
     }
@@ -1086,9 +1086,10 @@ final class Channel implements IteratorAggregate
             $value = array_shift($this->buffer);
 
             if (!empty($this->sendQueue)) {
+                // Indexed access: [0] = fiber, [1] = value
                 $sender = array_shift($this->sendQueue);
-                $this->buffer[] = $sender["value"];
-                $sender["fiber"]->resume();
+                $this->buffer[] = $sender[1];
+                $sender[0]->resume();
             }
 
             return $value;
@@ -1103,9 +1104,8 @@ final class Channel implements IteratorAggregate
             throw new Exception("receive() must be called from within a Fiber");
         }
 
-        $this->receiveQueue[] = [
-            "fiber" => $currentFiber,
-        ];
+        // Store bare Fiber — no wrapper array needed for receiveQueue
+        $this->receiveQueue[] = $currentFiber;
 
         return Fiber::suspend();
     }
@@ -1117,8 +1117,9 @@ final class Channel implements IteratorAggregate
         }
 
         if (!empty($this->receiveQueue)) {
-            $receiver = array_shift($this->receiveQueue);
-            $receiver["fiber"]->resume($value);
+            // receiveQueue stores bare Fiber objects
+            $fiber = array_shift($this->receiveQueue);
+            $fiber->resume($value);
             return true;
         }
 
@@ -1136,9 +1137,10 @@ final class Channel implements IteratorAggregate
             $value = array_shift($this->buffer);
 
             if (!empty($this->sendQueue)) {
+                // Indexed access: [0] = fiber, [1] = value
                 $sender = array_shift($this->sendQueue);
-                $this->buffer[] = $sender["value"];
-                $sender["fiber"]->resume();
+                $this->buffer[] = $sender[1];
+                $sender[0]->resume();
             }
 
             return $value;
@@ -1151,12 +1153,14 @@ final class Channel implements IteratorAggregate
     {
         $this->closed = true;
 
-        foreach ($this->receiveQueue as $receiver) {
-            $receiver["fiber"]->throw(new Exception("Channel is closed"));
+        // receiveQueue stores bare Fiber objects
+        foreach ($this->receiveQueue as $fiber) {
+            $fiber->throw(new Exception("Channel is closed"));
         }
 
+        // sendQueue stores indexed arrays: [0] = fiber, [1] = value
         foreach ($this->sendQueue as $sender) {
-            $sender["fiber"]->throw(new Exception("Channel is closed"));
+            $sender[0]->throw(new Exception("Channel is closed"));
         }
 
         $this->receiveQueue = [];

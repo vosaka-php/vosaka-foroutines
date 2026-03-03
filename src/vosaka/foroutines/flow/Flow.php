@@ -73,6 +73,13 @@ final class Flow extends BaseFlow
      */
     private readonly mixed $source;
 
+    /**
+     * Cached no-op closure for Flow::empty() — avoids allocating a new
+     * closure object on every call. Uses `static function` to prevent
+     * capturing `$this` (reduces refcount overhead).
+     */
+    private static ?\Closure $emptySource = null;
+
     private function __construct(callable|Generator|Async|Fiber $source)
     {
         $this->source = $source;
@@ -110,13 +117,14 @@ final class Flow extends BaseFlow
     /**
      * Create an empty Flow (no emissions).
      *
+     * Reuses a cached static closure to avoid allocating a new closure
+     * object on every call.
+     *
      * @return Flow
      */
     public static function empty(): Flow
     {
-        return self::new(function () {
-            // Empty flow — no emissions
-        });
+        return self::new(self::$emptySource ??= static function () {});
     }
 
     /**
@@ -305,8 +313,8 @@ final class Flow extends BaseFlow
         callable $collector,
         array $bufferOp,
     ): void {
-        $capacity = $bufferOp["capacity"];
-        $strategy = $bufferOp["strategy"];
+        $capacity = $bufferOp[1];
+        $strategy = $bufferOp[2];
 
         /** @var array<int, mixed> $buffer Ring buffer */
         $buffer = [];
@@ -542,7 +550,7 @@ final class Flow extends BaseFlow
 
             // Yield to the scheduler
             if ($insideFiber) {
-                Pause::new();
+                Pause::force();
             } else {
                 // Outside Fiber — small sleep to avoid hot CPU spin
                 usleep(100);

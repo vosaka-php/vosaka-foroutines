@@ -38,7 +38,13 @@ use vosaka\foroutines\Pause;
 final class SharedFlow extends BaseFlow
 {
     /**
-     * @var array<string, array{
+     * Registered collectors.
+     *
+     * Uses int keys (auto-increment) instead of string keys (uniqid)
+     * so that PHP can use a packed array internally — faster lookup
+     * and no string allocation per collector registration.
+     *
+     * @var array<int, array{
      *     callback: callable,
      *     emittedCount: int,
      *     skippedCount: int,
@@ -47,6 +53,13 @@ final class SharedFlow extends BaseFlow
      * }>
      */
     private array $collectors = [];
+
+    /**
+     * Auto-increment key for collector registration.
+     * Replaces uniqid("c_", true) — pure int increment is ~100x faster
+     * than uniqid() which calls gettimeofday + generates a string.
+     */
+    private int $nextCollectorId = 0;
 
     /**
      * Ring buffer of emitted values.
@@ -96,8 +109,8 @@ final class SharedFlow extends BaseFlow
 
     /**
      * Fibers that are suspended waiting for buffer space (SUSPEND strategy).
-     * Each entry is [Fiber, mixed value].
-     * @var array<int, array{fiber: Fiber, value: mixed}>
+     * Each entry is [Fiber, mixed value] (indexed array, not associative).
+     * @var array<int, array{0: Fiber, 1: mixed}>
      */
     private array $suspendedEmitters = [];
 
@@ -327,7 +340,10 @@ final class SharedFlow extends BaseFlow
      */
     public function collect(callable $collector): void
     {
-        $collectorKey = uniqid("c_", true);
+        // Int auto-increment — avoids uniqid() syscall + string allocation.
+        // PHP keeps int-keyed arrays as packed arrays when keys are
+        // sequential, which is faster than hash-table-backed string keys.
+        $collectorKey = $this->nextCollectorId++;
         $emittedCount = 0;
         $skippedCount = 0;
 
@@ -373,7 +389,7 @@ final class SharedFlow extends BaseFlow
      * @param string $collectorKey The collector key returned conceptually
      *                             (internal — for advanced use).
      */
-    public function removeCollector(string $collectorKey): void
+    public function removeCollector(string|int $collectorKey): void
     {
         unset($this->collectors[$collectorKey]);
     }
@@ -399,7 +415,8 @@ final class SharedFlow extends BaseFlow
 
         // Wake all suspended emitters so they don't hang forever
         foreach ($this->suspendedEmitters as $id => $entry) {
-            $fiber = $entry["fiber"];
+            // Indexed access: [0] = fiber, [1] = value
+            $fiber = $entry[0];
             unset($this->suspendedEmitters[$id]);
             if ($fiber->isSuspended()) {
                 $fiber->resume(false); // false = "not accepted"
@@ -556,12 +573,11 @@ final class SharedFlow extends BaseFlow
         $fiber = Fiber::getCurrent();
 
         if ($fiber !== null) {
-            // Inside a Fiber — register ourselves and suspend
+            // Inside a Fiber — register ourselves and suspend.
+            // Uses indexed array [fiber, value] instead of associative
+            // ["fiber" => ..., "value" => ...] to avoid hash table overhead.
             $emitterId = $this->nextEmitterId++;
-            $this->suspendedEmitters[$emitterId] = [
-                "fiber" => $fiber,
-                "value" => $value,
-            ];
+            $this->suspendedEmitters[$emitterId] = [$fiber, $value];
 
             // Suspend — we'll be resumed by resumeSuspendedEmitters()
             // when a collector consumes a value or a new collector registers.
@@ -580,7 +596,7 @@ final class SharedFlow extends BaseFlow
 
         while ($this->isBufferFull() && $this->isActive && $spins < $maxSpins) {
             // Attempt to drive the scheduler so collectors can run
-            Pause::new(); // no-op outside Fiber, but documents intent
+            Pause::force(); // must yield immediately to let collectors drain
             usleep(100); // small real-time sleep to avoid hot spin
             $spins++;
         }
@@ -612,8 +628,9 @@ final class SharedFlow extends BaseFlow
                 break; // No more space — remaining emitters stay suspended
             }
 
-            $fiber = $entry["fiber"];
-            $value = $entry["value"];
+            // Indexed access: [0] = fiber, [1] = value
+            $fiber = $entry[0];
+            $value = $entry[1];
 
             // Remove from waiting list BEFORE resuming to prevent re-entrancy issues
             unset($this->suspendedEmitters[$id]);
@@ -635,7 +652,9 @@ final class SharedFlow extends BaseFlow
     {
         parent::__clone();
         $this->collectors = [];
+        $this->nextCollectorId = 0;
         $this->suspendedEmitters = [];
+        $this->nextEmitterId = 0;
         // Buffer contents are preserved in the clone (for replay purposes)
     }
 }

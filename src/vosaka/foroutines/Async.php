@@ -15,7 +15,7 @@ use Generator;
  */
 final class Async
 {
-    public function __construct(public Fiber $fiber) {}
+    public function __construct(public ?Fiber $fiber) {}
 
     /**
      * Creates a new asynchronous task.
@@ -98,11 +98,15 @@ final class Async
             }
 
             if (!$this->fiber->isTerminated()) {
-                Pause::new();
+                Pause::force();
             }
         }
 
-        return $this->fiber->getReturn();
+        $result = $this->fiber->getReturn();
+        // Release fiber reference early so its memory can be reclaimed
+        // before the Async object itself is garbage-collected.
+        $this->fiber = null;
+        return $result;
     }
 
     /**
@@ -163,6 +167,10 @@ final class Async
             }
         }
 
-        return $this->fiber->getReturn();
+        $result = $this->fiber->getReturn();
+        // Release fiber reference early so its memory can be reclaimed
+        // before the Async object itself is garbage-collected.
+        $this->fiber = null;
+        return $result;
     }
 }
