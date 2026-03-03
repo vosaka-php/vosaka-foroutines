@@ -9,6 +9,37 @@ use Exception;
 
 final class Channels
 {
+    /**
+     * Create a new inter-process channel (socket-based transport).
+     *
+     * This is the **primary, simplified** factory method. It spawns a
+     * ChannelBroker background process and returns an owner Channel.
+     *
+     * Usage:
+     *   $ch = Channels::create(5);   // buffered, capacity 5
+     *   $ch = Channels::create();    // unbounded (no capacity limit)
+     *
+     * In a child process (Dispatchers::IO / pcntl_fork), reconnect with:
+     *   $ch->connect();
+     *
+     * The Channel is also serializable — when captured inside a closure
+     * that is sent to a worker process (SerializableClosure), it will
+     * automatically reconnect on unserialize.
+     *
+     * @param int   $capacity     Maximum buffer size (0 = unbounded / no limit).
+     * @param float $readTimeout  Read timeout for blocking operations (seconds).
+     * @param float $idleTimeout  Broker idle timeout (seconds, 0 = no timeout).
+     * @return Channel A connected Channel that owns the broker.
+     * @throws Exception If the broker cannot be started.
+     */
+    public static function create(
+        int $capacity = 0,
+        float $readTimeout = 30.0,
+        float $idleTimeout = 300.0,
+    ): Channel {
+        return Channel::create($capacity, $readTimeout, $idleTimeout);
+    }
+
     public static function new(): Channel
     {
         return new Channel(0);
@@ -25,7 +56,10 @@ final class Channels
     }
 
     /**
-     * Create inter-process channel (for the first process that creates the channel)
+     * Create inter-process channel (file-based transport — original implementation).
+     *
+     * Uses file_get_contents / file_put_contents + Mutex for synchronization.
+     * For better performance, consider using create() instead.
      */
     public static function createInterProcess(
         string $channelName,
@@ -48,7 +82,53 @@ final class Channels
     }
 
     /**
-     * Connect to existing inter-process channel (for other processes)
+     * Create inter-process channel using socket transport (with explicit name).
+     *
+     * Spawns a ChannelBroker background process that manages the channel
+     * buffer entirely in-memory. Communication goes over TCP loopback
+     * sockets instead of file I/O, providing:
+     *
+     *   - No file_get_contents / file_put_contents overhead
+     *   - No full-buffer serialize/unserialize on every operation
+     *   - Event-driven receive (no spin-wait polling)
+     *   - No file lock contention
+     *   - Works correctly on Windows (TCP sockets have proper non-blocking I/O)
+     *
+     * The returned Channel is the **owner** — it will shut down the broker
+     * when destroyed. Other processes should use connectSocket() to obtain
+     * a non-owner handle.
+     *
+     * Prefer Channels::create() for a simpler API that auto-generates the name.
+     *
+     * @param string $channelName  Unique channel identifier.
+     * @param int    $capacity     Maximum buffer size (0 = unbounded).
+     * @param float  $readTimeout  Read timeout for blocking operations (seconds).
+     * @param float  $idleTimeout  Broker idle timeout (seconds, 0 = no timeout).
+     * @return Channel A connected Channel that owns the broker.
+     * @throws Exception If the broker cannot be started.
+     */
+    public static function createSocketInterProcess(
+        string $channelName,
+        int $capacity = 0,
+        float $readTimeout = 30.0,
+        float $idleTimeout = 300.0,
+    ): Channel {
+        if (empty($channelName)) {
+            throw new Exception("Channel name cannot be empty");
+        }
+
+        return Channel::newSocketInterProcess(
+            $channelName,
+            $capacity,
+            $readTimeout,
+            $idleTimeout,
+        );
+    }
+
+    /**
+     * Connect to existing file-based inter-process channel (for other processes).
+     *
+     * For socket-based channels, use connectSocket() or $chan->connect() instead.
      */
     public static function connect(
         string $channelName,
@@ -60,7 +140,7 @@ final class Channels
             throw new Exception("Channel name cannot be empty");
         }
 
-        return Channel::connect(
+        return Channel::connectByName(
             $channelName,
             $serializer,
             $tempDir,
@@ -69,7 +149,43 @@ final class Channels
     }
 
     /**
-     * Check if inter-process channel exists
+     * Connect to an existing socket-based inter-process channel via port file.
+     *
+     * @deprecated The broker no longer writes a port file. Use
+     *             Channel::create() + $chan->connect() instead, or
+     *             Channel::connectSocketByPort() if you know the port.
+     *
+     * Discovers the broker's port by reading the port file and opens a
+     * TCP connection. The returned Channel is NOT the owner — it will
+     * not shut down the broker on destruction.
+     *
+     * @param string      $channelName    Unique channel identifier.
+     * @param float       $readTimeout    Read timeout for blocking operations (seconds).
+     * @param string|null $tempDir        Temp directory for port file discovery.
+     * @param float       $connectTimeout Max seconds to wait for broker.
+     * @return Channel A connected Channel (not the owner).
+     * @throws Exception If the broker cannot be found.
+     */
+    public static function connectSocket(
+        string $channelName,
+        float $readTimeout = 30.0,
+        ?string $tempDir = null,
+        float $connectTimeout = 10.0,
+    ): Channel {
+        if (empty($channelName)) {
+            throw new Exception("Channel name cannot be empty");
+        }
+
+        return Channel::connectSocket(
+            $channelName,
+            $readTimeout,
+            $tempDir,
+            $connectTimeout,
+        );
+    }
+
+    /**
+     * Check if a file-based inter-process channel exists.
      */
     public static function exists(
         string $channelName,
@@ -87,6 +203,36 @@ final class Channels
             md5($channelName) .
             ".dat";
         return file_exists($channelFile);
+    }
+
+    /**
+     * Check if a socket-based inter-process channel broker is running.
+     *
+     * @deprecated The broker no longer writes a port file, so this method
+     *             will always return false for channels created with the
+     *             new API (Channel::create / Channels::create). It only
+     *             works for legacy channels that still write port files.
+     *
+     * @param string      $channelName Channel identifier.
+     * @param string|null $tempDir     Temp directory (default: sys_get_temp_dir()).
+     * @return bool True if the broker's port file exists.
+     */
+    public static function existsSocket(
+        string $channelName,
+        ?string $tempDir = null,
+    ): bool {
+        if (empty($channelName)) {
+            return false;
+        }
+
+        $tempDir = $tempDir ?: sys_get_temp_dir();
+        $portFile =
+            $tempDir .
+            DIRECTORY_SEPARATOR .
+            "channel_broker_" .
+            md5($channelName) .
+            ".port";
+        return file_exists($portFile);
     }
 
     /**

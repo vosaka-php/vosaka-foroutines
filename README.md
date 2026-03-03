@@ -33,10 +33,20 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 │  │  MAIN:    EventLoop (deferred scheduling)                 │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Channel (3 transports)                 │   │
+│  │  IN-PROCESS: fiber ←→ fiber (in-memory array buffer)     │   │
+│  │  SOCKET IPC: Channel::create() → ChannelBroker (TCP)     │   │
+│  │              $ch->connect() in child (auto-reconnect)    │   │
+│  │  FILE IPC:   newInterProcess() → temp file + Mutex       │   │
+│  │  + Channels utils: merge, map, filter, zip, range, timer │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐    │
-│  │  Channel     │  │  Flow (cold) │  │  SharedFlow/StateFlow│    │
-│  │  (buffered   │  │  + buffer()  │  │  (hot, backpressure) │    │
-│  │   send/recv) │  │  operator    │  │  replay + extraBuf   │    │
+│  │  Flow (cold) │  │ SharedFlow / │  │  ChannelBroker       │    │
+│  │  + buffer()  │  │ StateFlow    │  │  (background TCP     │    │
+│  │  operator    │  │ (hot, back-  │  │   server for IPC     │    │
+│  │              │  │  pressure)   │  │   channels)          │    │
 │  └─────────────┘  └─────────────┘  └──────────────────────┘    │
 │                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐    │
@@ -56,7 +66,14 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 - Job lifecycle management (cancel, join, invokeOnCompletion)
 
 ### Communication & Streams
-- `Channel` for communication between foroutines (including inter-process)
+- **`Channel`** — three transport modes:
+  - **In-process** (`Channel::new()`) — fiber-to-fiber via in-memory buffer
+  - **Inter-process / socket** (`Channel::create()`) — background TCP broker with event-driven I/O (recommended for IPC)
+  - **Inter-process / file** (`Channel::newInterProcess()`) — temp file + mutex
+- `Channel` is serializable — works with `SerializableClosure` on Windows
+- `Channel::create()` + `$ch->connect()` for seamless child-process reconnection
+- **`Channels`** utility: `merge`, `map`, `filter`, `take`, `zip`, `range`, `timer`, `from`
+- **`ChannelIterator`** — `foreach` support on any Channel
 - `Flow` API: cold Flow, `SharedFlow`, `StateFlow`, `MutableStateFlow`
 - `Select` expression for channel multiplexing
 
@@ -193,6 +210,16 @@ $job->cancelAfter(2.0); // cancel after 2 seconds
 
 ### Channel
 
+Channel supports three transport modes:
+
+| Mode | Factory | Use Case |
+|---|---|---|
+| **In-process** | `Channel::new(capacity)` | Fibers in the same process |
+| **Inter-process (socket)** | `Channel::create(capacity)` | Multiple OS processes via TCP broker (recommended) |
+| **Inter-process (file)** | `Channel::newInterProcess(name, capacity)` | Multiple OS processes via temp file + mutex |
+
+#### In-process Channel (fibers only)
+
 ```php
 use vosaka\foroutines\channel\Channel;
 
@@ -205,6 +232,136 @@ var_dump($ch->receive()); // "world"
 
 $ch->close();
 ```
+
+#### Inter-process Channel (socket transport — recommended)
+
+`Channel::create()` spawns a background `ChannelBroker` process that manages an in-memory buffer over TCP loopback. Child processes reconnect with `$ch->connect()` — no arguments needed.
+
+```php
+use vosaka\foroutines\channel\Channel;
+use vosaka\foroutines\{RunBlocking, Launch, Async, Dispatchers, Thread};
+use function vosaka\foroutines\main;
+
+main(function () {
+    // Create a socket-based inter-process channel
+    $ch = Channel::create(5);          // buffered, capacity 5
+    // $ch = Channel::create();        // unbounded (no capacity limit)
+
+    RunBlocking::new(function () use ($ch) {
+        // Send from IO dispatcher (child process)
+        Launch::new(function () use ($ch) {
+            $ch->connect();            // reconnect in child — no args needed
+            $ch->send('from child 1');
+            $ch->send('from child 2');
+        }, Dispatchers::IO);
+
+        // Receive in parent
+        Launch::new(function () use ($ch) {
+            var_dump($ch->receive());  // "from child 1"
+            var_dump($ch->receive());  // "from child 2"
+        });
+
+        Thread::await();
+        $ch->close();
+        $ch->cleanup();
+    });
+});
+```
+
+#### trySend / tryReceive (non-blocking)
+
+```php
+$ch = Channel::create(1);
+
+$ok = $ch->trySend(42);         // true — buffer had space
+$ok = $ch->trySend(99);         // false — buffer full (capacity 1)
+
+$val = $ch->tryReceive();       // 42
+$val = $ch->tryReceive();       // null — buffer empty
+```
+
+#### Channel Serialization
+
+Channels created with `Channel::create()` are serializable — they work with `SerializableClosure` on Windows where `pcntl_fork()` is unavailable:
+
+```php
+$ch = Channel::create(5);
+
+// Serialize → unserialize round-trip (auto-reconnects)
+$serialized = serialize($ch);
+$ch2 = unserialize($serialized);
+$ch2->send('hello from unserialized');
+
+$val = $ch->receive(); // "hello from unserialized"
+```
+
+#### Channel Iterator (foreach)
+
+Channels implement `IteratorAggregate` — you can iterate with `foreach`:
+
+```php
+$ch = Channel::new(3);
+$ch->send('a');
+$ch->send('b');
+$ch->send('c');
+$ch->close();
+
+foreach ($ch as $value) {
+    var_dump($value); // "a", "b", "c"
+}
+```
+
+#### Channels Utility Class
+
+The `Channels` class provides functional operators and factory helpers:
+
+```php
+use vosaka\foroutines\channel\Channels;
+
+// Create channels
+$ch = Channels::create(5);                  // socket-based inter-process
+$ch = Channels::createBuffered(10);         // in-process buffered
+$ch = Channels::from([1, 2, 3, 4, 5]);     // pre-filled channel
+
+// Functional operators (return new Channel)
+$doubled = Channels::map($ch, fn($v) => $v * 2);
+$evens   = Channels::filter($ch, fn($v) => $v % 2 === 0);
+$first3  = Channels::take($ch, 3);
+$merged  = Channels::merge($ch1, $ch2, $ch3);
+$zipped  = Channels::zip($ch1, $ch2);
+
+// Generator channels
+$nums  = Channels::range(1, 100);           // sends 1..100
+$ticks = Channels::timer(500, maxTicks: 10); // sends microtime every 500ms
+```
+
+#### Socket Transport Architecture
+
+```
+Parent Process                      ChannelBroker (background)
+──────────────                      ──────────────────────────
+Channel::create(5)
+  └─ spawns broker ──────────────► listen(0) on 127.0.0.1
+  ← READY:<port>  ────────────────  ephemeral TCP port
+  └─ ChannelSocketClient           │
+     connects to port              ▼
+                              ┌──────────────────┐
+  send('hello') ─── TCP ───► │  in-memory buffer │
+  receive()     ◄── TCP ──── │  (capacity = 5)   │
+                              └──────────────────┘
+                                    ▲
+Child Process (fork / IO)           │
+──────────────────────────          │
+$ch->connect()  ─── TCP ───────────┘
+  └─ reconnects by cached port
+  send('world') ─── TCP ──────────►
+```
+
+| Transport | Overhead | Serialization | Blocking I/O | Windows |
+|---|---|---|---|---|
+| Socket (broker) | Low (~TCP loopback) | Not needed (in-memory buffer) | Event-driven (no spin-wait) | ✅ |
+| File (mutex) | Higher (file I/O + mutex) | Full buffer on every op | Spin-wait polling | ✅ |
+| In-process | Lowest (array) | N/A | Fiber suspend/resume | ✅ |
 
 ### Select
 
@@ -306,7 +463,78 @@ $result = $async->await();
 
 ## New Features (v2)
 
-The following features were added to improve real-world async performance, reduce CPU waste, and provide production-grade flow control.
+The following features were added to improve real-world async performance, reduce CPU waste, provide production-grade flow control, and enable robust inter-process communication.
+
+### Channel Rewrite — Three Transport Modes
+
+The Channel system was completely rewritten for v2 with a clean separation of concerns:
+
+| Class | Responsibility |
+|---|---|
+| `Channel` | Unified public API — delegates to the correct transport |
+| `ChannelBroker` | Background TCP server managing an in-memory buffer for socket transport |
+| `ChannelSocketClient` | TCP client connecting to a ChannelBroker |
+| `ChannelFileTransport` | File-based transport with Mutex synchronization |
+| `ChannelSerializer` | Multi-backend serialization (serialize, JSON, msgpack, igbinary) |
+| `ChannelIterator` | `foreach` support via `IteratorAggregate` |
+| `Channels` | Utility class with functional operators and factory methods |
+
+**Key improvements over v1:**
+- **`Channel::create()`** — one-line factory that spawns a broker and returns a ready-to-use channel
+- **`$ch->connect()`** — zero-argument reconnection in child processes (port is cached internally)
+- **Serializable channels** — `Channel` implements `__serialize` / `__unserialize` for `SerializableClosure` compatibility
+- **No port file** — the broker communicates the port via STDOUT (`READY:<port>`), eliminating file-based port discovery
+- **Parent-death detection** — broker monitors STDIN for EOF and shuts down automatically when the parent dies
+- **Idle timeout** — broker auto-shuts down after configurable inactivity (default: 300s)
+- **Multiple serializers** — `serialize` (default), `json`, `msgpack`, `igbinary`
+
+#### Channel API Reference
+
+**Factory methods:**
+
+| Method | Returns | Description |
+|---|---|---|
+| `Channel::new(capacity)` | `Channel` | In-process channel (fibers only) |
+| `Channel::create(capacity, readTimeout, idleTimeout)` | `Channel` | Socket-based IPC channel (spawns broker) |
+| `Channel::newInterProcess(name, capacity, serializer)` | `Channel` | File-based IPC channel |
+| `Channel::newSocketInterProcess(name, capacity)` | `Channel` | Socket IPC with explicit name |
+| `Channel::connectByName(name)` | `Channel` | Connect to existing file-based channel |
+| `Channel::connectSocketByPort(name, port)` | `Channel` | Connect to existing socket channel by port |
+| `Channels::create(capacity)` | `Channel` | Facade for `Channel::create()` |
+| `Channels::createBuffered(capacity)` | `Channel` | Facade for `Channel::new()` with capacity > 0 |
+| `Channels::from(array)` | `Channel` | Pre-filled in-process channel |
+
+**Instance methods:**
+
+| Method | Returns | Description |
+|---|---|---|
+| `send(value)` | `void` | Blocking send (suspends fiber if buffer full) |
+| `receive()` | `mixed` | Blocking receive (suspends fiber if buffer empty) |
+| `trySend(value)` | `bool` | Non-blocking send — returns `false` if full |
+| `tryReceive()` | `mixed` | Non-blocking receive — returns `null` if empty |
+| `close()` | `void` | Close the channel |
+| `connect()` | `self` | Reconnect in child process (socket/file transport) |
+| `cleanup()` | `void` | Release all resources (broker shutdown if owner) |
+| `isClosed()` | `bool` | Check if channel is closed |
+| `isEmpty()` | `bool` | Check if buffer is empty |
+| `isFull()` | `bool` | Check if buffer is full |
+| `size()` | `int` | Current buffer size |
+| `getInfo()` | `array` | Detailed channel state info |
+| `getName()` | `?string` | Channel name (IPC channels only) |
+| `getSocketPort()` | `?int` | Broker TCP port (socket transport only) |
+| `getTransport()` | `?string` | `"socket"`, `"file"`, or `null` (in-process) |
+
+**Channels utility operators:**
+
+| Method | Description |
+|---|---|
+| `Channels::merge(...$channels)` | Merge multiple channels into one |
+| `Channels::map($ch, $fn)` | Transform each value |
+| `Channels::filter($ch, $fn)` | Filter values by predicate |
+| `Channels::take($ch, $n)` | Take first N values |
+| `Channels::zip(...$channels)` | Zip values from multiple channels |
+| `Channels::range($start, $end, $step)` | Generate a range of numbers |
+| `Channels::timer($intervalMs, $maxTicks)` | Emit timestamps at intervals |
 
 ### AsyncIO — Non-blocking Stream I/O
 
@@ -596,6 +824,9 @@ When all three report no work, the scheduler sleeps briefly — similar to how N
 |---|---|---|
 | Fibers (core) | ✅ | ✅ |
 | AsyncIO (stream_select) | ✅ | ✅ |
+| Channel (in-process) | ✅ | ✅ |
+| Channel (socket transport) | ✅ | ✅ |
+| Channel (file transport) | ✅ | ✅ |
 | ForkProcess (pcntl_fork) | ✅ | ❌ (fallback to symfony/process) |
 | Process (symfony/process) | ✅ | ✅ |
 | Mutex (file lock) | ✅ | ✅ |
@@ -614,11 +845,13 @@ When all three report no work, the scheduler sleeps briefly — similar to how N
 | Syntax | `async/await` (language-level) | `AsyncIO::method()->await()` / `Async::new()->await()` (library-level) |
 | Deferred execution | Promises are eager | `AsyncIOOperation` is lazy (deferred until `->await()`) |
 | Flow control | Streams (backpressure built-in) | BackpressureStrategy (SUSPEND/DROP/ERROR) |
+| IPC channels | Worker threads + MessagePort | `Channel::create()` + TCP broker / file transport |
 
 **Key insight**: PHP's standard library I/O functions are blocking. VOsaka Foroutines works around this by:
 1. Using `stream_select()` for non-blocking socket/stream I/O in `Dispatchers::DEFAULT` via `AsyncIO::method()->await()`
 2. Offloading blocking I/O to child processes via `Dispatchers::IO` (with `pcntl_fork()` or `symfony/process`)
 3. Cooperative multitasking between fibers via `Pause::new()` / `Fiber::suspend()`
+4. `Channel::create()` for zero-config inter-process communication via a background TCP broker
 
 ## License
 

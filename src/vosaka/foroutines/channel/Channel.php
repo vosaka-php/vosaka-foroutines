@@ -6,54 +6,90 @@ namespace vosaka\foroutines\channel;
 
 use Exception;
 use Fiber;
-use ReflectionClass;
-use ReflectionProperty;
-use ReflectionMethod;
-use JsonSerializable;
-use Serializable;
 use IteratorAggregate;
-use vosaka\foroutines\sync\Mutex;
 
+/**
+ * Channel — a typed, bounded (or unbounded) communication pipe.
+ *
+ * Works in three modes:
+ *
+ *   1. **In-process** (default) — fibers in the same process exchange
+ *      values via an in-memory buffer.  Created with `Channel::new()`.
+ *
+ *   2. **Inter-process / file transport** — multiple OS processes share
+ *      a channel through a temp file + mutex.  Created with
+ *      `Channel::newInterProcess()` or `Channels::createInterProcess()`.
+ *
+ *   3. **Inter-process / socket transport** — a background TCP broker
+ *      manages an in-memory buffer; clients connect over loopback.
+ *      Created with `Channel::create()` (preferred) or
+ *      `Channel::newSocketInterProcess()`.
+ *
+ * ## Quick start
+ *
+ *     // Parent process — create a socket channel
+ *     $ch = Channel::create(5);          // buffered, capacity 5
+ *     $ch = Channel::create();           // unbounded
+ *
+ *     // Child process (pcntl_fork / Dispatchers::IO)
+ *     $ch->connect();                    // reconnect — no args needed
+ *     $ch->send("hello");
+ *
+ *     // The Channel is also serializable (works with SerializableClosure)
+ */
 final class Channel implements IteratorAggregate
 {
+    // ─── In-process state ────────────────────────────────────────────
     private array $buffer = [];
     private int $capacity;
     private array $sendQueue = [];
     private array $receiveQueue = [];
     private bool $closed = false;
 
-    // Inter-process support
+    // ─── Inter-process metadata ──────────────────────────────────────
     private bool $interProcess;
     private ?string $channelName = null;
-    private ?Mutex $bufferMutex = null;
-    private ?Mutex $queueMutex = null;
-    private ?int $sharedMemoryKey = null;
-    private $sharedMemory = null;
     private string $tempDir;
-    private ?string $channelFile = null;
-
-    /**
-     * Whether this Channel instance is the owner (creator) of the
-     * underlying inter-process storage (file / shared-memory segment).
-     *
-     * Only the owner is allowed to delete the backing file on cleanup /
-     * destruct / shutdown.  Connectors (child processes that call
-     * Channel::connect()) merely detach — they never remove the file.
-     *
-     * This fixes the bug where a Dispatchers::IO child process would
-     * destruct its Channel object on exit and accidentally delete the
-     * backing file before the parent (or another child) could read it.
-     */
     private bool $isOwner = false;
 
-    // Serialization options
-    private string $serializer;
+    // ─── Serialization ───────────────────────────────────────────────
+    private string $serializerName;
     private bool $preserveObjectTypes;
 
-    const SERIALIZER_SERIALIZE = "serialize";
-    const SERIALIZER_JSON = "json";
-    const SERIALIZER_MSGPACK = "msgpack";
-    const SERIALIZER_IGBINARY = "igbinary";
+    // ─── Transport layer ─────────────────────────────────────────────
+    /**
+     * "file" | "socket" | null (in-process only)
+     */
+    private ?string $transport = null;
+
+    /**
+     * Socket client — set only when transport === "socket".
+     */
+    private ?ChannelSocketClient $socketClient = null;
+
+    /**
+     * File transport — set only when transport === "file".
+     */
+    private ?ChannelFileTransport $fileTransport = null;
+
+    /**
+     * Cached broker port so it survives fork / serialization.
+     */
+    private ?int $_socketPort = null;
+
+    // ─── Constants ───────────────────────────────────────────────────
+
+    const SERIALIZER_SERIALIZE = ChannelSerializer::SERIALIZER_SERIALIZE;
+    const SERIALIZER_JSON = ChannelSerializer::SERIALIZER_JSON;
+    const SERIALIZER_MSGPACK = ChannelSerializer::SERIALIZER_MSGPACK;
+    const SERIALIZER_IGBINARY = ChannelSerializer::SERIALIZER_IGBINARY;
+
+    const TRANSPORT_FILE = "file";
+    const TRANSPORT_SOCKET = "socket";
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Constructor
+    // ═════════════════════════════════════════════════════════════════
 
     public function __construct(
         int $capacity = 0,
@@ -63,6 +99,7 @@ final class Channel implements IteratorAggregate
         ?string $tempDir = null,
         bool $preserveObjectTypes = true,
         bool $isOwner = false,
+        ?string $transport = null,
     ) {
         if ($capacity < 0) {
             throw new Exception("Channel capacity cannot be negative");
@@ -70,87 +107,132 @@ final class Channel implements IteratorAggregate
 
         $this->capacity = $capacity;
         $this->interProcess = $interProcess;
-        $this->serializer = $serializer;
+        $this->serializerName = $serializer;
         $this->preserveObjectTypes = $preserveObjectTypes;
         $this->tempDir = $tempDir ?: sys_get_temp_dir();
         $this->isOwner = $isOwner;
+        $this->transport = $transport;
 
-        if ($this->interProcess) {
-            $this->channelName = $channelName ?: "channel_" . uniqid();
-            $this->initInterProcessSupport();
-        }
-    }
-
-    /**
-     * Initialize inter-process support
-     */
-    private function initInterProcessSupport(): void
-    {
-        if (!$this->channelName) {
-            throw new Exception(
-                "Channel name is required for inter-process channels",
-            );
-        }
-
-        // Create mutexes for synchronization
-        $this->bufferMutex = new Mutex(
-            $this->channelName . "_buffer",
-            Mutex::LOCK_AUTO,
-            30,
-            $this->tempDir,
-        );
-
-        $this->queueMutex = new Mutex(
-            $this->channelName . "_queue",
-            Mutex::LOCK_AUTO,
-            30,
-            $this->tempDir,
-        );
-
-        // Initialize shared memory/file-based storage
-        $this->channelFile =
-            $this->tempDir .
-            DIRECTORY_SEPARATOR .
-            "channel_" .
-            md5($this->channelName) .
-            ".dat";
-
-        // Try to use System V shared memory if available
-        if ($this->isSharedMemoryAvailable()) {
-            $this->sharedMemoryKey = $this->generateSharedMemoryKey();
-            $this->initSharedMemory();
-        }
-
-        // Initialize channel state.
-        // If this is the owner and the backing file does not yet exist,
-        // persist the initial (empty) state so that Channel::connect()
-        // in child processes can find the file immediately.
         if (
-            $this->isOwner &&
-            $this->channelFile &&
-            !file_exists($this->channelFile)
+            $this->interProcess &&
+            $this->transport !== self::TRANSPORT_SOCKET
         ) {
-            $this->saveChannelState();
-        }
-        $this->loadChannelState();
-
-        // Only the owner process registers automatic cleanup on shutdown.
-        // Connectors (child processes) must NOT delete the backing file.
-        if ($this->isOwner) {
-            register_shutdown_function([$this, "cleanup"]);
+            $this->transport = self::TRANSPORT_FILE;
+            $this->channelName = $channelName ?: "channel_" . uniqid();
+            $this->initFileTransport();
+        } elseif (
+            $this->interProcess &&
+            $this->transport === self::TRANSPORT_SOCKET
+        ) {
+            $this->channelName = $channelName ?: "channel_" . uniqid();
+            // Socket transport is set up by factory methods that assign $socketClient.
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════
+    //  Factory methods
+    // ═════════════════════════════════════════════════════════════════
+
     /**
-     * Connect to an existing inter-process channel.
-     *
-     * The returned Channel is a **connector** (isOwner = false) — it will
-     * never delete the backing file on destruct / shutdown.  Only the
-     * process that originally created the channel via newInterProcess()
-     * (or Channels::createInterProcess()) is the owner and is allowed
-     * to remove the file.
+     * In-process channel (fibers only, no IPC).
      */
-    public static function connect(
+    public static function new(int $capacity = 0): Channel
+    {
+        return new self($capacity);
+    }
+
+    /**
+     * Create a socket-based inter-process channel.
+     *
+     * This is the **primary, simplified** factory.  It spawns a
+     * ChannelBroker background process and returns an owner Channel.
+     *
+     *     $ch = Channel::create(5);   // buffered, capacity 5
+     *     $ch = Channel::create();    // unbounded (no limit)
+     *
+     * In a child process reconnect with:
+     *
+     *     $ch->connect();
+     *
+     * @param int   $capacity     Buffer size (0 = unbounded).
+     * @param float $readTimeout  Read timeout in seconds.
+     * @param float $idleTimeout  Broker idle timeout in seconds.
+     */
+    public static function create(
+        int $capacity = 0,
+        float $readTimeout = 30.0,
+        float $idleTimeout = 300.0,
+    ): Channel {
+        $channelName = "channel_" . bin2hex(random_bytes(8)) . "_" . getmypid();
+
+        return self::newSocketInterProcess(
+            $channelName,
+            $capacity,
+            $readTimeout,
+            $idleTimeout,
+        );
+    }
+
+    /**
+     * File-based inter-process channel (original transport).
+     */
+    public static function newInterProcess(
+        string $channelName,
+        int $capacity = 0,
+        string $serializer = self::SERIALIZER_SERIALIZE,
+        ?string $tempDir = null,
+        bool $preserveObjectTypes = true,
+    ): Channel {
+        return new self(
+            $capacity,
+            true,
+            $channelName,
+            $serializer,
+            $tempDir,
+            $preserveObjectTypes,
+            true,
+            self::TRANSPORT_FILE,
+        );
+    }
+
+    /**
+     * Socket-based inter-process channel (with explicit name).
+     */
+    public static function newSocketInterProcess(
+        string $channelName,
+        int $capacity = 0,
+        float $readTimeout = 30.0,
+        float $idleTimeout = 300.0,
+    ): Channel {
+        $client = ChannelSocketClient::createBroker(
+            $channelName,
+            $capacity,
+            $readTimeout,
+            $idleTimeout,
+        );
+
+        $channel = new self(
+            $capacity,
+            true,
+            $channelName,
+            self::SERIALIZER_SERIALIZE,
+            null,
+            true,
+            true,
+            self::TRANSPORT_SOCKET,
+        );
+        $channel->socketClient = $client;
+        $channel->cacheSocketPort();
+
+        return $channel;
+    }
+
+    // ─── Static connect helpers (file / socket) ──────────────────────
+
+    /**
+     * Connect to an existing file-based channel by name.
+     */
+    public static function connectByName(
         string $channelName,
         string $serializer = self::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
@@ -168,8 +250,7 @@ final class Channel implements IteratorAggregate
             throw new Exception("Channel '{$channelName}' does not exist");
         }
 
-        // isOwner = false → connector never deletes the backing file
-        $channel = new self(
+        return new self(
             0,
             true,
             $channelName,
@@ -177,583 +258,417 @@ final class Channel implements IteratorAggregate
             $tempDir,
             $preserveObjectTypes,
             false,
+            self::TRANSPORT_FILE,
         );
-        return $channel;
     }
 
     /**
-     * Check if System V shared memory is available
+     * @deprecated Alias of connectByName().
      */
-    private function isSharedMemoryAvailable(): bool
-    {
-        return extension_loaded("sysvshm") &&
-            function_exists("shm_attach") &&
-            !$this->isWindows();
-    }
-
-    /**
-     * Check if running on Windows
-     */
-    private function isWindows(): bool
-    {
-        return strtoupper(substr(PHP_OS, 0, 3)) === "WIN";
-    }
-
-    /**
-     * Generate shared memory key
-     */
-    private function generateSharedMemoryKey(): int
-    {
-        if (
-            function_exists("ftok") &&
-            $this->channelFile &&
-            file_exists($this->channelFile)
-        ) {
-            $key = ftok($this->channelFile, "c");
-            if ($key !== -1) {
-                return $key;
-            }
-        }
-        return abs(crc32($this->channelName ?? "default")) % 0x7fffffff;
-    }
-
-    /**
-     * Initialize shared memory segment
-     */
-    private function initSharedMemory(): void
-    {
-        if ($this->sharedMemoryKey === null) {
-            return;
-        }
-
-        $size = 1024 * 1024; // 1MB default
-        $this->sharedMemory = @shm_attach($this->sharedMemoryKey, $size, 0666);
-
-        if (!$this->sharedMemory) {
-            // Fallback to file-based storage
-            $this->sharedMemory = null;
-        }
-    }
-
-    /**
-     * Load channel state from persistent storage (with mutex).
-     *
-     * Call this from code that is NOT already inside a
-     * bufferMutex->synchronized() block.
-     */
-    private function loadChannelState(): void
-    {
-        if (!$this->interProcess || !$this->bufferMutex) {
-            return;
-        }
-
-        $this->bufferMutex->synchronized(function () {
-            $this->loadChannelStateRaw();
-        });
-    }
-
-    /**
-     * Load channel state from persistent storage WITHOUT acquiring
-     * the mutex.  Call this only from code that is already running
-     * inside a bufferMutex->synchronized() block to avoid a nested-
-     * lock deadlock (file locks on Windows are not re-entrant).
-     */
-    private function loadChannelStateRaw(): void
-    {
-        $state = $this->readChannelState();
-        if ($state) {
-            $this->buffer = $state["buffer"] ?? [];
-            $this->closed = $state["closed"] ?? false;
-            $this->capacity = $state["capacity"] ?? $this->capacity;
-        }
-    }
-
-    /**
-     * Save channel state to persistent storage
-     */
-    private function saveChannelState(): void
-    {
-        if (!$this->interProcess) {
-            return;
-        }
-
-        $state = [
-            "buffer" => $this->buffer,
-            "closed" => $this->closed,
-            "capacity" => $this->capacity,
-            "timestamp" => microtime(true),
-            "pid" => getmypid(),
-            "name" => $this->channelName,
-            "serializer" => $this->serializer,
-            "created_by" => getmypid(),
-        ];
-
-        $this->writeChannelState($state);
-    }
-
-    /**
-     * Read channel state from storage
-     */
-    private function readChannelState(): ?array
-    {
-        try {
-            // Try shared memory first
-            if ($this->sharedMemory) {
-                $data = @shm_get_var($this->sharedMemory, 1);
-                if ($data !== false) {
-                    return $this->unserializeData($data);
-                }
-            }
-
-            // Fallback to file
-            if ($this->channelFile && file_exists($this->channelFile)) {
-                $data = file_get_contents($this->channelFile);
-                if ($data !== false) {
-                    return $this->unserializeData($data);
-                }
-            }
-        } catch (Exception $e) {
-            error_log("Failed to read channel state: " . $e->getMessage());
-        }
-
-        return null;
-    }
-
-    /**
-     * Write channel state to storage
-     */
-    private function writeChannelState(array $state): void
-    {
-        try {
-            $serialized = $this->serializeData($state);
-
-            // Try shared memory first
-            if ($this->sharedMemory) {
-                if (@shm_put_var($this->sharedMemory, 1, $serialized)) {
-                    return;
-                }
-            }
-
-            // Fallback to file
-            if ($this->channelFile) {
-                $tempFile = $this->channelFile . ".tmp." . getmypid();
-                if (
-                    file_put_contents($tempFile, $serialized, LOCK_EX) !== false
-                ) {
-                    rename($tempFile, $this->channelFile);
-                }
-            }
-        } catch (Exception $e) {
-            error_log("Failed to write channel state: " . $e->getMessage());
-        }
-    }
-
-    /**
-     * Serialize data based on configured serializer
-     */
-    private function serializeData($data): string
-    {
-        try {
-            switch ($this->serializer) {
-                case self::SERIALIZER_JSON:
-                    if (is_object($data) && $this->preserveObjectTypes) {
-                        $serialized = [
-                            "__class__" => get_class($data),
-                            "__data__" => $this->objectToArray($data),
-                        ];
-                        return json_encode($serialized, JSON_THROW_ON_ERROR);
-                    }
-                    return json_encode($data, JSON_THROW_ON_ERROR);
-
-                case self::SERIALIZER_MSGPACK:
-                    if (function_exists("msgpack_pack")) {
-                        return \msgpack_pack($data);
-                    }
-                    return serialize($data);
-
-                case self::SERIALIZER_IGBINARY:
-                    if (function_exists("igbinary_serialize")) {
-                        return \igbinary_serialize($data);
-                    }
-                    return serialize($data);
-
-                case self::SERIALIZER_SERIALIZE:
-                default:
-                    return serialize($data);
-            }
-        } catch (Exception $e) {
-            throw new Exception(
-                "Failed to serialize data: " . $e->getMessage(),
-            );
-        }
-    }
-
-    /**
-     * Unserialize data based on configured serializer
-     */
-    private function unserializeData(string $data)
-    {
-        try {
-            switch ($this->serializer) {
-                case self::SERIALIZER_JSON:
-                    $decoded = json_decode(
-                        $data,
-                        true,
-                        512,
-                        JSON_THROW_ON_ERROR,
-                    );
-
-                    if (
-                        $this->preserveObjectTypes &&
-                        is_array($decoded) &&
-                        isset($decoded["__class__"]) &&
-                        isset($decoded["__data__"])
-                    ) {
-                        return $this->arrayToObject(
-                            $decoded["__class__"],
-                            $decoded["__data__"],
-                        );
-                    }
-
-                    return $decoded;
-
-                case self::SERIALIZER_MSGPACK:
-                    if (function_exists("msgpack_unpack")) {
-                        return \msgpack_unpack($data);
-                    }
-                    return unserialize($data);
-
-                case self::SERIALIZER_IGBINARY:
-                    if (function_exists("igbinary_unserialize")) {
-                        return \igbinary_unserialize($data);
-                    }
-                    return unserialize($data);
-
-                case self::SERIALIZER_SERIALIZE:
-                default:
-                    return unserialize($data);
-            }
-        } catch (Exception $e) {
-            throw new Exception(
-                "Failed to unserialize data: " . $e->getMessage(),
-            );
-        }
-    }
-
-    /**
-     * Convert object to array for JSON serialization
-     */
-    private function objectToArray(object $object): array
-    {
-        if ($object instanceof JsonSerializable) {
-            return $object->jsonSerialize();
-        }
-
-        $reflection = new ReflectionClass($object);
-        $data = [];
-
-        // Get public properties
-        foreach (
-            $reflection->getProperties(ReflectionProperty::IS_PUBLIC)
-            as $property
-        ) {
-            $data[$property->getName()] = $property->getValue($object);
-        }
-
-        // Get properties via getter methods
-        foreach (
-            $reflection->getMethods(ReflectionMethod::IS_PUBLIC)
-            as $method
-        ) {
-            $methodName = $method->getName();
-            if (
-                strpos($methodName, "get") === 0 &&
-                $method->getNumberOfParameters() === 0
-            ) {
-                $propertyName = lcfirst(substr($methodName, 3));
-                if (!isset($data[$propertyName])) {
-                    try {
-                        $data[$propertyName] = $method->invoke($object);
-                    } catch (Exception) {
-                        // Skip if getter throws exception
-                    }
-                }
-            }
-        }
-
-        return $data;
-    }
-
-    /**
-     * Convert array back to object for JSON deserialization
-     */
-    private function arrayToObject(string $className, array $data): object
-    {
-        if (!class_exists($className)) {
-            throw new Exception("Class {$className} does not exist");
-        }
-
-        $reflection = new ReflectionClass($className);
-
-        try {
-            $object = $reflection->newInstanceWithoutConstructor();
-
-            foreach (
-                $reflection->getProperties(ReflectionProperty::IS_PUBLIC)
-                as $property
-            ) {
-                $propertyName = $property->getName();
-                if (array_key_exists($propertyName, $data)) {
-                    $property->setValue($object, $data[$propertyName]);
-                }
-            }
-
-            foreach ($data as $key => $value) {
-                $setterName = "set" . ucfirst($key);
-                if ($reflection->hasMethod($setterName)) {
-                    $method = $reflection->getMethod($setterName);
-                    if (
-                        $method->isPublic() &&
-                        $method->getNumberOfParameters() >= 1
-                    ) {
-                        try {
-                            $method->invoke($object, $value);
-                        } catch (Exception) {
-                            // Skip if setter throws exception
-                        }
-                    }
-                }
-            }
-
-            return $object;
-        } catch (Exception) {
-            try {
-                $constructor = $reflection->getConstructor();
-                if (
-                    $constructor &&
-                    $constructor->getNumberOfParameters() === 0
-                ) {
-                    $object = $reflection->newInstance();
-                } else {
-                    $object = $this->createObjectWithConstructor(
-                        $reflection,
-                        $data,
-                    );
-                }
-
-                foreach (
-                    $reflection->getProperties(ReflectionProperty::IS_PUBLIC)
-                    as $property
-                ) {
-                    $propertyName = $property->getName();
-                    if (array_key_exists($propertyName, $data)) {
-                        $property->setValue($object, $data[$propertyName]);
-                    }
-                }
-
-                return $object;
-            } catch (Exception $e2) {
-                throw new Exception(
-                    "Failed to recreate object of class {$className}: " .
-                        $e2->getMessage(),
-                );
-            }
-        }
-    }
-
-    /**
-     * Create object with constructor parameters
-     */
-    private function createObjectWithConstructor(
-        ReflectionClass $reflection,
-        array $data,
-    ): object {
-        $constructor = $reflection->getConstructor();
-        if (!$constructor) {
-            return $reflection->newInstance();
-        }
-
-        $parameters = $constructor->getParameters();
-        $args = [];
-
-        foreach ($parameters as $param) {
-            $paramName = $param->getName();
-
-            if (array_key_exists($paramName, $data)) {
-                $args[] = $data[$paramName];
-            } elseif ($param->isDefaultValueAvailable()) {
-                $args[] = $param->getDefaultValue();
-            } elseif ($param->allowsNull()) {
-                $args[] = null;
-            } else {
-                $variations = [
-                    $paramName,
-                    lcfirst($paramName),
-                    ucfirst($paramName),
-                    strtolower($paramName),
-                ];
-
-                $found = false;
-                foreach ($variations as $variation) {
-                    if (array_key_exists($variation, $data)) {
-                        $args[] = $data[$variation];
-                        $found = true;
-                        break;
-                    }
-                }
-
-                if (!$found) {
-                    throw new Exception(
-                        "Cannot find value for required parameter: {$paramName}",
-                    );
-                }
-            }
-        }
-
-        return $reflection->newInstanceArgs($args);
-    }
-
-    public function canSerialize($data): bool
-    {
-        try {
-            $this->serializeData($data);
-            return true;
-        } catch (Exception) {
-            return false;
-        }
-    }
-
-    public function getSerializationInfo($data): array
-    {
-        $info = [
-            "type" => gettype($data),
-            "serializable" => $this->canSerialize($data),
-            "size_bytes" => 0,
-            "serializer" => $this->serializer,
-            "preserve_object_types" => $this->preserveObjectTypes,
-        ];
-
-        if (is_object($data)) {
-            $info["class"] = get_class($data);
-            $info["implements_json_serializable"] =
-                $data instanceof JsonSerializable;
-            $info["implements_serializable"] = $data instanceof Serializable;
-
-            $reflection = new ReflectionClass($data);
-            $info["has_sleep_method"] = $reflection->hasMethod("__sleep");
-            $info["has_wakeup_method"] = $reflection->hasMethod("__wakeup");
-            $info["has_serialize_method"] = $reflection->hasMethod(
-                "__serialize",
-            );
-            $info["has_unserialize_method"] = $reflection->hasMethod(
-                "__unserialize",
-            );
-        }
-
-        if ($info["serializable"]) {
-            try {
-                $serialized = $this->serializeData($data);
-                $info["size_bytes"] = strlen($serialized);
-            } catch (Exception) {
-                $info["size_bytes"] = 0;
-            }
-        }
-
-        return $info;
-    }
-
-    public function testData($data): array
-    {
-        $result = [
-            "compatible" => false,
-            "info" => $this->getSerializationInfo($data),
-            "errors" => [],
-            "warnings" => [],
-        ];
-
-        try {
-            $serialized = $this->serializeData($data);
-            $unserialized = $this->unserializeData($serialized);
-
-            $result["compatible"] = true;
-            $result["serialized_size"] = strlen($serialized);
-
-            if (is_object($data) && is_object($unserialized)) {
-                if (get_class($data) !== get_class($unserialized)) {
-                    $result["warnings"][] =
-                        "Object class changed during serialization";
-                }
-            }
-
-            if (strlen($serialized) > 1024 * 1024) {
-                $result["warnings"][] =
-                    "Large data size may impact performance";
-            }
-        } catch (Exception $e) {
-            $result["errors"][] = $e->getMessage();
-        }
-
-        return $result;
-    }
-
-    public static function getRecommendedSerializer($data): string
-    {
-        if (is_object($data)) {
-            if (function_exists("igbinary_serialize")) {
-                return self::SERIALIZER_IGBINARY;
-            }
-            return self::SERIALIZER_SERIALIZE;
-        }
-
-        if (is_array($data) || is_scalar($data)) {
-            if (function_exists("msgpack_pack")) {
-                return self::SERIALIZER_MSGPACK;
-            }
-            return self::SERIALIZER_JSON;
-        }
-
-        return self::SERIALIZER_SERIALIZE;
-    }
-
-    public static function new(int $capacity = 0): Channel
-    {
-        return new self($capacity);
-    }
-
-    /**
-     * Create a new inter-process channel.
-     *
-     * The returned Channel is the **owner** (isOwner = true) — it is
-     * responsible for cleaning up the backing file when it is no longer
-     * needed.  Other processes should use Channel::connect() to obtain
-     * a non-owner handle.
-     */
-    public static function newInterProcess(
+    public static function connectFile(
         string $channelName,
-        int $capacity = 0,
         string $serializer = self::SERIALIZER_SERIALIZE,
         ?string $tempDir = null,
         bool $preserveObjectTypes = true,
     ): Channel {
-        return new self(
-            $capacity,
-            true,
+        return self::connectByName(
             $channelName,
             $serializer,
             $tempDir,
             $preserveObjectTypes,
-            true, // isOwner = true
         );
     }
 
+    /**
+     * Connect to a socket-based channel via port file discovery.
+     *
+     * @deprecated Use Channel::create() + $chan->connect() instead.
+     */
+    public static function connectSocket(
+        string $channelName,
+        float $readTimeout = 30.0,
+        ?string $tempDir = null,
+        float $connectTimeout = 10.0,
+    ): Channel {
+        $client = ChannelSocketClient::connect(
+            $channelName,
+            $readTimeout,
+            $tempDir,
+            $connectTimeout,
+        );
+
+        $channel = new self(
+            0,
+            true,
+            $channelName,
+            self::SERIALIZER_SERIALIZE,
+            $tempDir,
+            true,
+            false,
+            self::TRANSPORT_SOCKET,
+        );
+        $channel->socketClient = $client;
+        $channel->cacheSocketPort();
+
+        return $channel;
+    }
+
+    /**
+     * Connect to a socket-based channel by port number.
+     */
+    public static function connectSocketByPort(
+        string $channelName,
+        int $port,
+        float $readTimeout = 30.0,
+    ): Channel {
+        $client = ChannelSocketClient::connectByPort(
+            $channelName,
+            $port,
+            $readTimeout,
+        );
+
+        $channel = new self(
+            0,
+            true,
+            $channelName,
+            self::SERIALIZER_SERIALIZE,
+            null,
+            true,
+            false,
+            self::TRANSPORT_SOCKET,
+        );
+        $channel->socketClient = $client;
+        $channel->cacheSocketPort();
+
+        return $channel;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Instance connect — for child processes
+    // ═════════════════════════════════════════════════════════════════
+
+    /**
+     * Reconnect this Channel instance in a child process.
+     *
+     * No arguments needed — the channel name, port and transport type
+     * are already stored in the object (they survive pcntl_fork and
+     * serialization).
+     *
+     *     // In Dispatchers::IO closure:
+     *     $ch->connect();          // done — ready to send/receive
+     *
+     * @return $this
+     */
+    public function connect(): self
+    {
+        if ($this->transport === self::TRANSPORT_SOCKET) {
+            // Disconnect stale connection (forked socket is invalid)
+            if ($this->socketClient !== null) {
+                try {
+                    $this->socketClient->disconnect();
+                } catch (\Throwable) {
+                }
+                $this->socketClient = null;
+            }
+
+            $port = $this->_socketPort;
+            if ($port === null || $port <= 0) {
+                throw new Exception(
+                    "Channel '{$this->channelName}' has no stored port. " .
+                        "Was this channel created with Channel::create()?",
+                );
+            }
+
+            $this->socketClient = ChannelSocketClient::connectByPort(
+                $this->channelName,
+                $port,
+            );
+            $this->isOwner = false;
+
+            return $this;
+        }
+
+        if ($this->transport === self::TRANSPORT_FILE) {
+            $this->isOwner = false;
+            if ($this->fileTransport !== null) {
+                $this->fileTransport->setOwner(false);
+                $this->fileTransport->loadChannelState();
+            } else {
+                $this->initFileTransport();
+            }
+            return $this;
+        }
+
+        throw new Exception(
+            "connect() is only supported for inter-process channels.",
+        );
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Public API — send / receive / trySend / tryReceive
+    // ═════════════════════════════════════════════════════════════════
+
     public function send(mixed $value): void
     {
-        if ($this->interProcess) {
-            $this->sendInterProcess($value);
-        } else {
-            $this->sendInProcess($value);
+        if ($this->isSocketTransport()) {
+            $this->socketClient->send($value);
+            return;
+        }
+        if ($this->fileTransport !== null) {
+            $this->fileTransport->send($value);
+            return;
+        }
+        $this->sendInProcess($value);
+    }
+
+    public function receive(): mixed
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->receive();
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->receive();
+        }
+        return $this->receiveInProcess();
+    }
+
+    public function trySend(mixed $value): bool
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->trySend($value);
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->trySend($value);
+        }
+        return $this->trySendInProcess($value);
+    }
+
+    public function tryReceive(): mixed
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->tryReceive();
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->tryReceive();
+        }
+        return $this->tryReceiveInProcess();
+    }
+
+    public function close(): void
+    {
+        if ($this->isSocketTransport()) {
+            $this->socketClient->close();
+            return;
+        }
+        if ($this->fileTransport !== null) {
+            $this->fileTransport->close();
+            return;
+        }
+        $this->closeInProcess();
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  State queries
+    // ═════════════════════════════════════════════════════════════════
+
+    public function isClosed(): bool
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->isClosed();
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->isClosed();
+        }
+        return $this->closed;
+    }
+
+    public function isEmpty(): bool
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->isEmpty();
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->isEmpty();
+        }
+        return empty($this->buffer);
+    }
+
+    public function isFull(): bool
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->isFull();
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->isFull();
+        }
+        return count($this->buffer) >= $this->capacity && $this->capacity > 0;
+    }
+
+    public function size(): int
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->size();
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->size();
+        }
+        return count($this->buffer);
+    }
+
+    public function getInfo(): array
+    {
+        if ($this->isSocketTransport()) {
+            return $this->socketClient->getInfo();
+        }
+        if ($this->fileTransport !== null) {
+            return $this->fileTransport->getInfo();
+        }
+        return [
+            "capacity" => $this->capacity,
+            "size" => count($this->buffer),
+            "closed" => $this->closed,
+            "inter_process" => false,
+            "channel_name" => $this->channelName,
+            "transport" => "in-process",
+            "platform" => PHP_OS,
+        ];
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Accessors
+    // ═════════════════════════════════════════════════════════════════
+
+    public function getName(): ?string
+    {
+        return $this->channelName;
+    }
+
+    public function getSocketPort(): ?int
+    {
+        return $this->_socketPort ?? $this->socketClient?->getPort();
+    }
+
+    public function getTransport(): ?string
+    {
+        return $this->transport;
+    }
+
+    public function isOwner(): bool
+    {
+        return $this->isOwner;
+    }
+
+    public function isSocketTransport(): bool
+    {
+        return $this->transport === self::TRANSPORT_SOCKET &&
+            $this->socketClient !== null;
+    }
+
+    public function getIterator(): ChannelIterator
+    {
+        return new ChannelIterator($this);
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Cleanup / destruct
+    // ═════════════════════════════════════════════════════════════════
+
+    public function cleanup(): void
+    {
+        if ($this->isSocketTransport() && $this->socketClient !== null) {
+            if ($this->isOwner) {
+                $this->socketClient->shutdown();
+            } else {
+                $this->socketClient->disconnect();
+            }
+            $this->socketClient = null;
+            return;
+        }
+
+        if ($this->fileTransport !== null) {
+            $this->fileTransport->cleanup();
+            $this->fileTransport = null;
         }
     }
+
+    public function __destruct()
+    {
+        $this->cleanup();
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Serialization — Channel survives serialize / unserialize
+    //  (for SerializableClosure on Windows / proc_open path)
+    // ═════════════════════════════════════════════════════════════════
+
+    public function __serialize(): array
+    {
+        return [
+            "channelName" => $this->channelName,
+            "capacity" => $this->capacity,
+            "interProcess" => $this->interProcess,
+            "transport" => $this->transport,
+            "socketPort" => $this->_socketPort,
+            "serializer" => $this->serializerName,
+            "preserveObjectTypes" => $this->preserveObjectTypes,
+            "tempDir" => $this->tempDir,
+        ];
+    }
+
+    public function __unserialize(array $data): void
+    {
+        $this->channelName = $data["channelName"] ?? null;
+        $this->capacity = $data["capacity"] ?? 0;
+        $this->interProcess = $data["interProcess"] ?? true;
+        $this->transport = $data["transport"] ?? null;
+        $this->_socketPort = $data["socketPort"] ?? null;
+        $this->serializerName =
+            $data["serializer"] ?? self::SERIALIZER_SERIALIZE;
+        $this->preserveObjectTypes = $data["preserveObjectTypes"] ?? true;
+        $this->tempDir = $data["tempDir"] ?? sys_get_temp_dir();
+        $this->isOwner = false;
+        $this->closed = false;
+        $this->buffer = [];
+        $this->sendQueue = [];
+        $this->receiveQueue = [];
+        $this->socketClient = null;
+        $this->fileTransport = null;
+
+        // Auto-reconnect
+        try {
+            $this->connect();
+        } catch (\Throwable) {
+            // Will be retried on first use or manual connect()
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Serializer delegation (for callers that still need these)
+    // ═════════════════════════════════════════════════════════════════
+
+    public function canSerialize(mixed $data): bool
+    {
+        return $this->makeSerializer()->canSerialize($data);
+    }
+
+    public function getSerializationInfo(mixed $data): array
+    {
+        return $this->makeSerializer()->getSerializationInfo($data);
+    }
+
+    public function testData(mixed $data): array
+    {
+        return $this->makeSerializer()->testData($data);
+    }
+
+    public static function getRecommendedSerializer(mixed $data): string
+    {
+        return ChannelSerializer::getRecommendedSerializer($data);
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Private — in-process operations
+    // ═════════════════════════════════════════════════════════════════
 
     private function sendInProcess(mixed $value): void
     {
@@ -783,73 +698,6 @@ final class Channel implements IteratorAggregate
         ];
 
         Fiber::suspend();
-    }
-
-    /**
-     * Send a value through the inter-process channel.
-     *
-     * Uses a **short-lock + retry-outside-lock** pattern:
-     *   1. Acquire the mutex.
-     *   2. Reload state from disk, try to append the value.
-     *   3. If the buffer is full, release the mutex and sleep briefly
-     *      so that other processes (consumers) can acquire the lock
-     *      and drain the buffer.
-     *   4. Retry from step 1.
-     *
-     * This eliminates the previous deadlock where the mutex was held
-     * for the entire duration of the spin-wait, preventing consumers
-     * from ever running.
-     */
-    private function sendInterProcess(mixed $value): void
-    {
-        if (!$this->bufferMutex) {
-            throw new Exception("Buffer mutex not initialized");
-        }
-
-        $timeoutMs = 5000;
-        $startTime = microtime(true) * 1000;
-
-        while (true) {
-            $sent = $this->bufferMutex->synchronized(function () use ($value) {
-                $this->loadChannelStateRaw();
-
-                if ($this->closed) {
-                    throw new Exception("Channel is closed");
-                }
-
-                if (
-                    count($this->buffer) < $this->capacity ||
-                    $this->capacity === 0
-                ) {
-                    $this->buffer[] = $value;
-                    $this->saveChannelState();
-                    $this->notifyReceivers();
-                    return true; // success
-                }
-
-                return false; // buffer full — will retry
-            });
-
-            if ($sent) {
-                return;
-            }
-
-            // Buffer was full — release the lock, sleep, then retry.
-            if (microtime(true) * 1000 - $startTime > $timeoutMs) {
-                throw new Exception("Send timeout: buffer is full");
-            }
-
-            usleep(1000);
-        }
-    }
-
-    public function receive(): mixed
-    {
-        if ($this->interProcess) {
-            return $this->receiveInterProcess();
-        } else {
-            return $this->receiveInProcess();
-        }
     }
 
     private function receiveInProcess(): mixed
@@ -882,74 +730,8 @@ final class Channel implements IteratorAggregate
         return Fiber::suspend();
     }
 
-    /**
-     * Receive a value from the inter-process channel.
-     *
-     * Uses the same **short-lock + retry-outside-lock** pattern as
-     * sendInterProcess():
-     *   1. Acquire the mutex.
-     *   2. Reload state from disk, try to shift a value from the buffer.
-     *   3. If the buffer is empty (and the channel is still open),
-     *      release the mutex and sleep briefly so that producers can
-     *      acquire the lock and write data.
-     *   4. Retry from step 1.
-     *
-     * This eliminates the previous deadlock where the mutex was held
-     * for the entire duration of the spin-wait, preventing producers
-     * from ever running.
-     */
-    private function receiveInterProcess(): mixed
+    private function trySendInProcess(mixed $value): bool
     {
-        if (!$this->bufferMutex) {
-            throw new Exception("Buffer mutex not initialized");
-        }
-
-        $timeoutMs = 100000;
-        $startTime = microtime(true) * 1000;
-
-        while (true) {
-            $result = $this->bufferMutex->synchronized(function () {
-                $this->loadChannelStateRaw();
-
-                if (!empty($this->buffer)) {
-                    $value = array_shift($this->buffer);
-                    $this->saveChannelState();
-                    // Return a wrapper so we can distinguish "got a value"
-                    // from "buffer was empty" (the value itself could be null).
-                    return ["__found" => true, "value" => $value];
-                }
-
-                if ($this->closed) {
-                    throw new Exception("Channel is closed and empty");
-                }
-
-                return null; // buffer empty — will retry
-            });
-
-            if ($result !== null && ($result["__found"] ?? false)) {
-                return $result["value"];
-            }
-
-            // Buffer was empty — release the lock, sleep, then retry.
-            if (microtime(true) * 1000 - $startTime > $timeoutMs) {
-                throw new Exception("Receive timeout: no data available");
-            }
-
-            usleep(1000);
-        }
-    }
-
-    private function notifyReceivers(): void
-    {
-        // Placeholder for IPC notification mechanism
-    }
-
-    public function trySend(mixed $value): bool
-    {
-        if ($this->interProcess) {
-            return $this->trySendInterProcess($value);
-        }
-
         if ($this->closed) {
             return false;
         }
@@ -968,39 +750,8 @@ final class Channel implements IteratorAggregate
         return false;
     }
 
-    private function trySendInterProcess(mixed $value): bool
+    private function tryReceiveInProcess(): mixed
     {
-        if (!$this->bufferMutex) {
-            return false;
-        }
-
-        return $this->bufferMutex->synchronized(function () use ($value) {
-            $this->loadChannelStateRaw();
-
-            if ($this->closed) {
-                return false;
-            }
-
-            if (
-                count($this->buffer) < $this->capacity ||
-                $this->capacity === 0
-            ) {
-                $this->buffer[] = $value;
-                $this->saveChannelState();
-                $this->notifyReceivers();
-                return true;
-            }
-
-            return false;
-        });
-    }
-
-    public function tryReceive(): mixed
-    {
-        if ($this->interProcess) {
-            return $this->tryReceiveInterProcess();
-        }
-
         if (!empty($this->buffer)) {
             $value = array_shift($this->buffer);
 
@@ -1014,34 +765,6 @@ final class Channel implements IteratorAggregate
         }
 
         return null;
-    }
-
-    private function tryReceiveInterProcess(): mixed
-    {
-        if (!$this->bufferMutex) {
-            return null;
-        }
-
-        return $this->bufferMutex->synchronized(function () {
-            $this->loadChannelStateRaw();
-
-            if (!empty($this->buffer)) {
-                $value = array_shift($this->buffer);
-                $this->saveChannelState();
-                return $value;
-            }
-
-            return null;
-        });
-    }
-
-    public function close(): void
-    {
-        if ($this->interProcess) {
-            $this->closeInterProcess();
-        } else {
-            $this->closeInProcess();
-        }
     }
 
     private function closeInProcess(): void
@@ -1060,131 +783,33 @@ final class Channel implements IteratorAggregate
         $this->sendQueue = [];
     }
 
-    private function closeInterProcess(): void
+    // ═════════════════════════════════════════════════════════════════
+    //  Private — helpers
+    // ═════════════════════════════════════════════════════════════════
+
+    private function cacheSocketPort(): void
     {
-        if ($this->bufferMutex) {
-            $this->bufferMutex->synchronized(function () {
-                $this->loadChannelStateRaw();
-                $this->closed = true;
-                $this->saveChannelState();
-            });
+        if ($this->socketClient !== null) {
+            $this->_socketPort = $this->socketClient->getPort();
         }
     }
 
-    public function isClosed(): bool
+    private function initFileTransport(): void
     {
-        if ($this->interProcess && $this->bufferMutex) {
-            return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelStateRaw();
-                return $this->closed;
-            });
-        }
-
-        return $this->closed;
+        $this->fileTransport = new ChannelFileTransport(
+            $this->channelName,
+            $this->capacity,
+            $this->isOwner,
+            $this->makeSerializer(),
+            $this->tempDir,
+        );
     }
 
-    public function isEmpty(): bool
+    private function makeSerializer(): ChannelSerializer
     {
-        if ($this->interProcess && $this->bufferMutex) {
-            return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelStateRaw();
-                return empty($this->buffer);
-            });
-        }
-
-        return empty($this->buffer);
-    }
-
-    public function isFull(): bool
-    {
-        if ($this->interProcess && $this->bufferMutex) {
-            return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelStateRaw();
-                return count($this->buffer) >= $this->capacity &&
-                    $this->capacity > 0;
-            });
-        }
-
-        return count($this->buffer) >= $this->capacity && $this->capacity > 0;
-    }
-
-    public function size(): int
-    {
-        if ($this->interProcess && $this->bufferMutex) {
-            return $this->bufferMutex->synchronized(function () {
-                $this->loadChannelStateRaw();
-                return count($this->buffer);
-            });
-        }
-
-        return count($this->buffer);
-    }
-
-    public function getIterator(): ChannelIterator
-    {
-        return new ChannelIterator($this);
-    }
-
-    public function getInfo(): array
-    {
-        return [
-            "capacity" => $this->capacity,
-            "size" => $this->size(),
-            "closed" => $this->isClosed(),
-            "inter_process" => $this->interProcess,
-            "channel_name" => $this->channelName,
-            "serializer" => $this->serializer,
-            "shared_memory_available" => $this->isSharedMemoryAvailable(),
-            "shared_memory_key" => $this->sharedMemoryKey,
-            "channel_file" => $this->channelFile,
-            "platform" => PHP_OS,
-        ];
-    }
-
-    /**
-     * Clean up inter-process resources.
-     *
-     * - Shared memory is always detached (both owner and connector).
-     * - The backing **file is only deleted by the owner**.  Connectors
-     *   (child processes that obtained this handle via Channel::connect())
-     *   never remove the file so the owner / other processes can still
-     *   read data that was written.
-     */
-    public function cleanup(): void
-    {
-        if ($this->interProcess) {
-            if ($this->sharedMemory) {
-                try {
-                    @shm_detach($this->sharedMemory);
-                } catch (\Error) {
-                    // Already destroyed/detached — ignore
-                }
-                $this->sharedMemory = null;
-            }
-
-            // Only the owner is allowed to delete the backing file.
-            if (
-                $this->isOwner &&
-                $this->channelFile &&
-                file_exists($this->channelFile)
-            ) {
-                @unlink($this->channelFile);
-            }
-            $this->channelFile = null;
-        }
-    }
-
-    /**
-     * Returns true if this Channel instance is the owner (creator) of
-     * the underlying inter-process storage.
-     */
-    public function isOwner(): bool
-    {
-        return $this->isOwner;
-    }
-
-    public function __destruct()
-    {
-        $this->cleanup();
+        return new ChannelSerializer(
+            $this->serializerName,
+            $this->preserveObjectTypes,
+        );
     }
 }

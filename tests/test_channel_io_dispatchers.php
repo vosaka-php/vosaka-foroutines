@@ -12,8 +12,8 @@
  *   1. **isOwner flag**: Only the process that created the channel
  *      (via Channels::createInterProcess / Channel::newInterProcess) is the
  *      "owner" and is allowed to delete the backing file on destruct/shutdown.
- *      Child processes that obtain a handle via Channel::connect() are mere
- *      connectors — they never delete the file.
+ *      Child processes that obtain a handle via Channel::connectByName() are
+ *      mere connectors — they never delete the file.
  *
  *   2. **Short-lock + retry-outside-lock pattern**: sendInterProcess() and
  *      receiveInterProcess() no longer hold the mutex for the entire spin-wait
@@ -107,7 +107,7 @@ main(function () {
     //
     // IO child process connects to the named channel, sends 3 strings,
     // and returns.  Main then reads them via tryReceive polling.
-    // This works because Channel::connect() returns a connector
+    // This works because Channel::connectByName() returns a connector
     // (isOwner=false) which does NOT delete the file on destruct.
     // ================================================================
     var_dump("=== Test 1: IO producer -> main consumer ===");
@@ -116,7 +116,7 @@ main(function () {
 
     RunBlocking::new(function () use ($ch1) {
         $async = Async::new(function () {
-            $ch = Channel::connect("t1_io_prod");
+            $ch = Channel::connectByName("t1_io_prod");
             for ($i = 0; $i < 3; $i++) {
                 $ch->send("hello_$i");
             }
@@ -154,7 +154,7 @@ main(function () {
 
     RunBlocking::new(function () {
         $async = Async::new(function () {
-            $ch = Channel::connect("t2_io_cons");
+            $ch = Channel::connectByName("t2_io_cons");
             $sum = 0;
             for ($i = 0; $i < 3; $i++) {
                 $val = $ch->tryReceive();
@@ -190,7 +190,7 @@ main(function () {
     RunBlocking::new(function () {
         // Phase 1: IO producer
         $producer = Async::new(function () {
-            $ch = Channel::connect("t3_io2io");
+            $ch = Channel::connectByName("t3_io2io");
             for ($i = 1; $i <= 10; $i++) {
                 $ch->send($i);
             }
@@ -200,7 +200,7 @@ main(function () {
 
         // Phase 2: IO consumer
         $consumer = Async::new(function () {
-            $ch = Channel::connect("t3_io2io");
+            $ch = Channel::connectByName("t3_io2io");
             $sum = 0;
             for ($i = 0; $i < 10; $i++) {
                 $val = $ch->tryReceive();
@@ -240,8 +240,8 @@ main(function () {
 
     RunBlocking::new(function () use ($chRes) {
         $async = Async::new(function () {
-            $req = Channel::connect("t4_req");
-            $res = Channel::connect("t4_res");
+            $req = Channel::connectByName("t4_req");
+            $res = Channel::connectByName("t4_res");
             for ($i = 0; $i < 3; $i++) {
                 $ping = $req->tryReceive();
                 if ($ping !== null) {
@@ -285,7 +285,7 @@ main(function () {
         $asyncTasks = [];
         for ($p = 1; $p <= 3; $p++) {
             $asyncTasks[] = Async::new(function () use ($p) {
-                $ch = Channel::connect("t5_fanin");
+                $ch = Channel::connectByName("t5_fanin");
                 for ($i = 1; $i <= 3; $i++) {
                     $ch->send($p * $i);
                 }
@@ -329,7 +329,7 @@ main(function () {
 
     RunBlocking::new(function () use ($ch6) {
         $async = Async::new(function () {
-            $ch = Channel::connect("t6_types");
+            $ch = Channel::connectByName("t6_types");
             $ch->send(42);
             $ch->send(3.14);
             $ch->send("hello");
@@ -374,7 +374,7 @@ main(function () {
 
     RunBlocking::new(function () use ($ch7, $largePayload) {
         $async = Async::new(function () use ($largePayload) {
-            $ch = Channel::connect("t7_large");
+            $ch = Channel::connectByName("t7_large");
             $ch->send($largePayload);
             return true;
         }, Dispatchers::IO);
@@ -409,7 +409,7 @@ main(function () {
 
     RunBlocking::new(function () use ($ch8) {
         $async = Async::new(function () {
-            $ch = Channel::connect("t8_close");
+            $ch = Channel::connectByName("t8_close");
             $ch->send("before_close");
             $ch->close();
             return true;
@@ -442,7 +442,7 @@ main(function () {
 
     RunBlocking::new(function () use ($ch9) {
         $async = Async::new(function () {
-            $ch = Channel::connect("t9_try");
+            $ch = Channel::connectByName("t9_try");
             $ok = $ch->trySend("io_nonblocking");
             return $ok;
         }, Dispatchers::IO);
