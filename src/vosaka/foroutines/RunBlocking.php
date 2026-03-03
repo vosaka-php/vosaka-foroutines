@@ -60,6 +60,15 @@ final class RunBlocking
         // work to the WorkerPool while keeping the orchestration in
         // the parent.
 
+        // Ensure Launch::$queue (SplQueue) is initialized before either
+        // phase tries to access it.  Launch::$queue is only created inside
+        // Launch's constructor, so calling getInstance() guarantees the
+        // singleton (and therefore the queue) exists.  Without this, a
+        // fiber that terminates without ever suspending would skip Phase 1
+        // entirely, and Phase 2's `count(Launch::$queue)` would hit an
+        // uninitialized typed static property.
+        Launch::getInstance();
+
         if (!$callable instanceof Fiber) {
             $callable = FiberUtils::makeFiber($callable);
         }
