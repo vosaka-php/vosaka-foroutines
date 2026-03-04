@@ -5,22 +5,35 @@ ini_set("display_startup_errors", 1);
 ini_set("error_log", "foroutines-errors-" . date("YmdH") . ".log");
 error_reporting(E_ALL);
 
-$possiblePaths = [
-    __DIR__ . "/../vendor/autoload.php",
-    __DIR__ . "/../../vendor/autoload.php",
-    __DIR__ . "/../../../vendor/autoload.php",
-    __DIR__ . "/../../../../vendor/autoload.php",
-    __DIR__ . "/../../../../../vendor/autoload.php",
-];
+function findAutoload(string $startDir, int $maxDepth = 10): string
+{
+    $dir = $startDir;
 
-$autoloadFound = false;
-foreach ($possiblePaths as $path) {
-    if (file_exists($path)) {
-        require_once $path;
-        $autoloadFound = true;
-        break;
+    for ($i = 0; $i < $maxDepth; $i++) {
+        if (
+            file_exists($dir . "/composer.json") &&
+            file_exists($dir . "/vendor/autoload.php")
+        ) {
+            return $dir . "/vendor/autoload.php";
+        }
+
+        if (file_exists($dir . "/vendor/autoload.php")) {
+            return $dir . "/vendor/autoload.php";
+        }
+
+        $parent = dirname($dir);
+        if ($parent === $dir) {
+            break;
+        }
+        $dir = $parent;
     }
+
+    throw new RuntimeException(
+        "Cannot find vendor/autoload.php (searched from: $startDir)",
+    );
 }
+
+require_once findAutoload(__DIR__);
 
 require_once __DIR__ . DIRECTORY_SEPARATOR . "script_functions.php";
 

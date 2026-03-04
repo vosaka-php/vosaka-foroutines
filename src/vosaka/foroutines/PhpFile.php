@@ -4,8 +4,8 @@ namespace vosaka\foroutines;
 
 use Exception;
 use InvalidArgumentException;
-use vosaka\foroutines\Delay;
 use Symfony\Component\Process\Process as SymfonyProcess;
+use vosaka\foroutines\Delay;
 
 /**
  * Class PhpFile

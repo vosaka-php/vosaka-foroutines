@@ -48,30 +48,37 @@ error_reporting(E_ALL);
 
 // ── Bootstrap: find and load Composer autoloader ──────────────────────
 
-$possiblePaths = [
-    __DIR__ . "/../../vendor/autoload.php",
-    __DIR__ . "/../../../vendor/autoload.php",
-    __DIR__ . "/../../../../vendor/autoload.php",
-    __DIR__ . "/../../../../../vendor/autoload.php",
-    __DIR__ . "/../../../../../../vendor/autoload.php",
-];
+function findAutoload(string $startDir, int $maxDepth = 10): string
+{
+    $dir = $startDir;
 
-$autoloadFound = false;
-foreach ($possiblePaths as $path) {
-    if (file_exists($path)) {
-        require_once $path;
-        $autoloadFound = true;
-        break;
+    for ($i = 0; $i < $maxDepth; $i++) {
+        if (
+            file_exists($dir . "/composer.json") &&
+            file_exists($dir . "/vendor/autoload.php")
+        ) {
+            return $dir . "/vendor/autoload.php";
+        }
+
+        if (file_exists($dir . "/vendor/autoload.php")) {
+            return $dir . "/vendor/autoload.php";
+        }
+
+        $parent = dirname($dir);
+        if ($parent === $dir) {
+            break;
+        }
+        $dir = $parent;
     }
-}
 
-if (!$autoloadFound) {
     fwrite(
         STDERR,
         "channel_broker_pool_process: Could not find vendor/autoload.php\n",
     );
     exit(1);
 }
+
+require_once findAutoload(__DIR__);
 
 use vosaka\foroutines\channel\ChannelBrokerPool;
 
@@ -108,10 +115,7 @@ $signalReceived = false;
 if (function_exists("pcntl_async_signals")) {
     pcntl_async_signals(true);
 
-    $signalHandler = function (int $signo) use (
-        $pool,
-        &$signalReceived,
-    ): void {
+    $signalHandler = function (int $signo) use ($pool, &$signalReceived): void {
         $signalReceived = true;
         $pool->stop();
         fwrite(
