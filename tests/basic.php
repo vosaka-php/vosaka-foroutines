@@ -11,7 +11,7 @@ use vosaka\foroutines\Repeat;
 use vosaka\foroutines\Thread;
 use vosaka\foroutines\WithTimeout;
 
-use function vosaka\foroutines\main;
+use vosaka\foroutines\AsyncMain;
 
 // This function simulates an asynchronous
 // Dispatchers::IO operation that open new thread
@@ -27,7 +27,9 @@ function work(string $str): Async
 
 // Must be run in the main thread
 // If you dont make this check, the code IO will cause memory leak
-main(function () {
+#[AsyncMain]
+function main()
+{
     $time = microtime(true);
 
     RunBlocking::new(function () {
@@ -64,4 +66,4 @@ main(function () {
 
     var_dump("Total execution time:", microtime(true) - $time);
     var_dump("Memory usage: " . memory_get_usage(true) / 1024 . "KB");
-});
+}

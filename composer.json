@@ -19,7 +19,8 @@
             "vosaka\\foroutines\\": "src/vosaka/foroutines/"
         },
         "files": [
-            "src/vosaka/foroutines/functions.php"
+            "src/vosaka/foroutines/functions.php",
+            "src/vosaka/foroutines/main_processor.php"
         ]
     },
     "authors": [

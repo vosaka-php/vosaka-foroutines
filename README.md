@@ -124,6 +124,23 @@ composer require venndev/vosaka-fourotines
 ## Usage
 
 All entry points must be wrapped in `main()` to prevent issues with IO dispatchers.
+Or you can use attribute `#[AsyncMain]` on your main function:
+
+```php
+use vosaka\foroutines\AsyncMain;
+
+#[AsyncMain]
+function main(): void {
+    // Your async code here
+}
+
+// Or with main() wrapper:
+use function vosaka\foroutines\main;
+
+main(function () {
+    // Your async code here
+});
+```
 
 ### Basic: RunBlocking + Launch
 
