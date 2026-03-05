@@ -325,6 +325,7 @@ final class WorkerPool
     public static function resetState(): void
     {
         WorkerPoolState::resetAll();
+        WorkerLifecycle::resetAllBackoff();
     }
 
     // ═══════════════════════════════════════════════════════════════════

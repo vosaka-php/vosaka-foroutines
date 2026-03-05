@@ -247,6 +247,7 @@ final class ForkProcess
             EventLoop::resetState();
             Pause::resetState();
             Launch::resetPool();
+            RuntimeFiberPool::resetState();
 
             // Execute the user's closure
             $result = $closure();

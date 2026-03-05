@@ -13,13 +13,43 @@ use InvalidArgumentException;
  *
  * Represents an asynchronous task that can be executed in a separate Foroutine.
  * This class allows you to run a function or generator asynchronously and wait for its result.
+ *
+ * RuntimeFiberPool integration:
+ * For DEFAULT dispatcher tasks, Async now acquires cooperative fibers from
+ * the global RuntimeFiberPool instead of allocating raw Fiber instances.
+ * Pooled worker shell fibers do NOT terminate when the task completes —
+ * they suspend with a completion sentinel. The await() methods detect this
+ * via RuntimeFiberPool::isCooperativeTaskComplete() and recycle the fiber
+ * back to the pool, retrieving the stored result.
  */
 final class Async
 {
+    /**
+     * Whether this Async's fiber is managed by RuntimeFiberPool.
+     * When true, completion is detected via the pool's sentinel
+     * mechanism rather than Fiber::isTerminated().
+     */
+    public bool $poolManaged = false;
+
+    /**
+     * Stored result from a pool-managed fiber's completed task.
+     * Set when the pool recycles the fiber and hands us the result.
+     */
+    private mixed $poolResult = null;
+
+    /**
+     * Whether a pool result has been collected.
+     */
+    private bool $poolResultCollected = false;
+
     public function __construct(public ?Fiber $fiber) {}
 
     /**
      * Creates a new asynchronous task.
+     *
+     * For DEFAULT dispatcher, acquires a cooperative fiber from RuntimeFiberPool
+     * instead of allocating a raw Fiber. This reuses pre-started worker shell
+     * fibers (~1µs dispatch vs ~5-15µs allocation) and reduces GC pressure.
      *
      * @param callable|Generator $callable The function or generator to run asynchronously.
      * @param Dispatchers $dispatcher The dispatcher to use for the async task.
@@ -39,8 +69,43 @@ final class Async
             return new self($fiber);
         }
 
+        // DEFAULT dispatcher — use RuntimeFiberPool if available
+        if (Launch::isPooledMode()) {
+            return self::newPooled($callable);
+        }
+
         $fiber = FiberUtils::makeFiber($callable);
         return new self($fiber);
+    }
+
+    /**
+     * Create a pool-backed Async for the DEFAULT dispatcher.
+     *
+     * Wraps Generator callables into plain callables, acquires a
+     * cooperative fiber from RuntimeFiberPool, and marks the Async
+     * as pool-managed so await() uses the correct completion detection.
+     */
+    private static function newPooled(callable|Generator $callable): Async
+    {
+        $pool = RuntimeFiberPool::getInstance();
+
+        // Wrap Generator instances into a plain callable
+        if ($callable instanceof Generator) {
+            $gen = $callable;
+            $callable = static function () use ($gen): mixed {
+                while ($gen->valid()) {
+                    $gen->next();
+                    Pause::new();
+                }
+                return $gen->getReturn();
+            };
+        }
+
+        $fiber = $pool->acquireCooperativeFiber($callable);
+
+        $async = new self($fiber);
+        $async->poolManaged = $pool->isManagedFiber($fiber);
+        return $async;
     }
 
     /**
@@ -95,6 +160,10 @@ final class Async
      * control back to the scheduler via Pause::force() so that other
      * fibers (Launch jobs, etc.) can also make progress.
      *
+     * RuntimeFiberPool integration: for pool-managed asyncs, checks
+     * isCooperativeTaskComplete() instead of isTerminated() and recycles
+     * the fiber back to the pool upon completion.
+     *
      * @param array<int|string, Async> $asyncs
      * @return array<int|string, mixed>
      */
@@ -107,14 +176,42 @@ final class Async
             foreach ($pending as $key => $async) {
                 $fiber = $async->fiber;
 
+                // Already collected pool result
+                if ($async->poolResultCollected) {
+                    $results[$key] = $async->poolResult;
+                    $async->fiber = null;
+                    unset($pending[$key]);
+                    continue;
+                }
+
                 if ($fiber === null || $fiber->isTerminated()) {
                     // Collect the result
+                    if ($async->poolManaged && $fiber !== null) {
+                        RuntimeFiberPool::getInstance()->notifyFiberTerminated(
+                            $fiber,
+                        );
+                    }
                     $results[$key] =
                         $fiber !== null ? $fiber->getReturn() : null;
                     // Release fiber reference early
                     $async->fiber = null;
                     unset($pending[$key]);
                     continue;
+                }
+
+                // Pool-managed: check for cooperative completion sentinel
+                if ($async->poolManaged && $fiber->isSuspended()) {
+                    $pool = RuntimeFiberPool::getInstance();
+                    if ($pool->isCooperativeTaskComplete($fiber)) {
+                        $result = $pool->recycleCooperativeFiber($fiber);
+                        $async->fiber = null;
+                        if ($result instanceof \Throwable) {
+                            throw $result;
+                        }
+                        $results[$key] = $result;
+                        unset($pending[$key]);
+                        continue;
+                    }
                 }
 
                 if ($fiber->isSuspended()) {
@@ -138,6 +235,9 @@ final class Async
      * Manually drives the scheduler (AsyncIO, WorkerPool, Launch) on
      * each tick, then resumes all non-terminated fibers. A small usleep
      * is added on idle ticks to avoid 100% CPU spin.
+     *
+     * RuntimeFiberPool integration: also ticks the pool and checks for
+     * cooperative task completion on pool-managed asyncs.
      *
      * @param array<int|string, Async> $asyncs
      * @return array<int|string, mixed>
@@ -167,17 +267,53 @@ final class Async
                 $didWork = true;
             }
 
+            // Tick the RuntimeFiberPool to dispatch pending tasks and
+            // handle auto-scaling.
+            if (RuntimeFiberPool::isBooted()) {
+                RuntimeFiberPool::getInstance()->tick();
+            }
+
             // Resume all pending fibers
             foreach ($pending as $key => $async) {
                 $fiber = $async->fiber;
 
+                // Already collected pool result
+                if ($async->poolResultCollected) {
+                    $results[$key] = $async->poolResult;
+                    $async->fiber = null;
+                    unset($pending[$key]);
+                    $didWork = true;
+                    continue;
+                }
+
                 if ($fiber === null || $fiber->isTerminated()) {
+                    if ($async->poolManaged && $fiber !== null) {
+                        RuntimeFiberPool::getInstance()->notifyFiberTerminated(
+                            $fiber,
+                        );
+                    }
                     $results[$key] =
                         $fiber !== null ? $fiber->getReturn() : null;
                     $async->fiber = null;
                     unset($pending[$key]);
                     $didWork = true;
                     continue;
+                }
+
+                // Pool-managed: check for cooperative completion
+                if ($async->poolManaged && $fiber->isSuspended()) {
+                    $pool = RuntimeFiberPool::getInstance();
+                    if ($pool->isCooperativeTaskComplete($fiber)) {
+                        $result = $pool->recycleCooperativeFiber($fiber);
+                        $async->fiber = null;
+                        if ($result instanceof \Throwable) {
+                            throw $result;
+                        }
+                        $results[$key] = $result;
+                        unset($pending[$key]);
+                        $didWork = true;
+                        continue;
+                    }
                 }
 
                 if ($fiber->isSuspended()) {
@@ -209,10 +345,24 @@ final class Async
      * in non-Fiber context and Fiber::suspend() cannot be called outside a
      * Fiber.
      *
+     * RuntimeFiberPool integration: for pool-managed fibers, completion is
+     * detected via isCooperativeTaskComplete() and the worker shell is
+     * recycled back to the pool. The stored result is returned directly
+     * instead of calling fiber->getReturn().
+     *
      * @return mixed The result of the asynchronous task.
      */
     public function await(): mixed
     {
+        // If pool result was already collected (e.g. by awaitAll)
+        if ($this->poolResultCollected) {
+            $result = $this->poolResult;
+            $this->poolResult = null;
+            $this->poolResultCollected = false;
+            $this->fiber = null;
+            return $result;
+        }
+
         if (!$this->fiber->isStarted()) {
             $this->fiber->start();
         }
@@ -242,19 +392,55 @@ final class Async
      *
      * This ensures the outer scheduler can round-robin between all active
      * fibers including this one.
+     *
+     * RuntimeFiberPool: for pool-managed fibers, detects the cooperative
+     * task completion sentinel and recycles the worker shell to the pool.
      */
     private function waitInsideFiber(): mixed
     {
         while (!$this->fiber->isTerminated()) {
+            // Pool-managed: check for cooperative completion sentinel
+            if ($this->poolManaged && $this->fiber->isSuspended()) {
+                $pool = RuntimeFiberPool::getInstance();
+                if ($pool->isCooperativeTaskComplete($this->fiber)) {
+                    $result = $pool->recycleCooperativeFiber($this->fiber);
+                    $this->fiber = null;
+                    if ($result instanceof \Throwable) {
+                        throw $result;
+                    }
+                    return $result;
+                }
+            }
+
             if ($this->fiber->isSuspended()) {
                 $this->fiber->resume();
             }
 
             if (!$this->fiber->isTerminated()) {
+                // Check again after resume — the task might have just completed
+                if ($this->poolManaged && $this->fiber->isSuspended()) {
+                    $pool = RuntimeFiberPool::getInstance();
+                    if ($pool->isCooperativeTaskComplete($this->fiber)) {
+                        $result = $pool->recycleCooperativeFiber($this->fiber);
+                        $this->fiber = null;
+                        if ($result instanceof \Throwable) {
+                            throw $result;
+                        }
+                        return $result;
+                    }
+                }
+
                 Pause::force();
             }
         }
 
+        // Non-pooled fiber terminated — get result directly
+        if ($this->poolManaged) {
+            // Pool-managed fiber terminated unexpectedly — notify pool
+            RuntimeFiberPool::getInstance()->notifyFiberTerminated(
+                $this->fiber,
+            );
+        }
         $result = $this->fiber->getReturn();
         // Release fiber reference early so its memory can be reclaimed
         // before the Async object itself is garbage-collected.
@@ -276,6 +462,9 @@ final class Async
      *   - Give child processes real wall-clock time to advance
      *   - Allow the OS scheduler to run child processes
      *   - Let stream_select() in AsyncIO detect readiness
+     *
+     * RuntimeFiberPool: also ticks the pool and checks for cooperative
+     * task completion on pool-managed fibers.
      */
     private function waitOutsideFiber(): mixed
     {
@@ -303,12 +492,47 @@ final class Async
                 $didWork = true;
             }
 
+            // Tick the RuntimeFiberPool for pending dispatch & scaling
+            if (RuntimeFiberPool::isBooted()) {
+                RuntimeFiberPool::getInstance()->tick();
+            }
+
+            // Pool-managed: check for cooperative completion sentinel
+            if ($this->poolManaged && $this->fiber->isSuspended()) {
+                $pool = RuntimeFiberPool::getInstance();
+                if ($pool->isCooperativeTaskComplete($this->fiber)) {
+                    $result = $pool->recycleCooperativeFiber($this->fiber);
+                    $this->fiber = null;
+                    if ($result instanceof \Throwable) {
+                        throw $result;
+                    }
+                    return $result;
+                }
+            }
+
             if ($this->fiber->isSuspended()) {
                 $this->fiber->resume();
                 $didWork = true;
             }
 
-            if (!$this->fiber->isTerminated()) {
+            // Check again after resume
+            if (
+                $this->poolManaged &&
+                $this->fiber !== null &&
+                $this->fiber->isSuspended()
+            ) {
+                $pool = RuntimeFiberPool::getInstance();
+                if ($pool->isCooperativeTaskComplete($this->fiber)) {
+                    $result = $pool->recycleCooperativeFiber($this->fiber);
+                    $this->fiber = null;
+                    if ($result instanceof \Throwable) {
+                        throw $result;
+                    }
+                    return $result;
+                }
+            }
+
+            if ($this->fiber !== null && !$this->fiber->isTerminated()) {
                 // Only sleep when no subsystem had actionable work this
                 // tick. When work IS happening, fibers yield naturally,
                 // so we don't need extra delay. When idle (e.g. waiting
@@ -320,7 +544,13 @@ final class Async
             }
         }
 
-        $result = $this->fiber->getReturn();
+        // Non-pooled fiber terminated — get result directly
+        if ($this->poolManaged && $this->fiber !== null) {
+            RuntimeFiberPool::getInstance()->notifyFiberTerminated(
+                $this->fiber,
+            );
+        }
+        $result = $this->fiber !== null ? $this->fiber->getReturn() : null;
         // Release fiber reference early so its memory can be reclaimed
         // before the Async object itself is garbage-collected.
         $this->fiber = null;

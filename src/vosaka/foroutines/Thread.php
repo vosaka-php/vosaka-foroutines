@@ -34,40 +34,60 @@ final class Thread
      */
     public static function await(): void
     {
+        $insideFiber = \Fiber::getCurrent() !== null;
+        $poolBooted = RuntimeFiberPool::isBooted();
+
         while (
             !WorkerPool::isEmpty() ||
             Launch::getInstance()->hasActiveTasks() ||
-            AsyncIO::hasPending()
+            AsyncIO::hasPending() ||
+            ($poolBooted &&
+                RuntimeFiberPool::getInstance()->hasPendingTasks()) ||
+            ($poolBooted &&
+                RuntimeFiberPool::getInstance()->hasCooperativeTasks())
         ) {
+            // When called inside a fiber (e.g. from within RunBlocking's main
+            // fiber), we must suspend on every iteration so the outer
+            // RunBlocking loop gets control and can call RuntimeFiberPool::tick()
+            // to dispatch pending tasks to newly-idle worker shells.
+            //
+            // Without this suspend, Thread::await() spins forever holding the
+            // fiber — RunBlocking's outer loop never resumes, tick() is never
+            // called, and tasks queued beyond the pool's initial size (default 16)
+            // are never dispatched, causing a permanent hang.
+            if ($insideFiber) {
+                Pause::force();
+                $poolBooted = RuntimeFiberPool::isBooted();
+                continue;
+            }
+
+            // Outside fiber: drive all subsystems manually.
             $didWork = false;
 
-            // Drive non-blocking stream I/O — poll all registered
-            // read/write watchers via stream_select() and resume
-            // fibers whose streams became ready.
             if (AsyncIO::hasPending()) {
                 if (AsyncIO::pollOnce()) {
                     $didWork = true;
                 }
             }
 
-            // Drive IO worker pool — may spawn new child processes
             if (!WorkerPool::isEmpty()) {
                 WorkerPool::run();
                 $didWork = true;
             }
 
-            // Drive cooperative fiber scheduler — resume one queued fiber
             if (Launch::getInstance()->hasActiveTasks()) {
                 Launch::getInstance()->runOnce();
                 $didWork = true;
             }
 
-            // Only sleep when none of the subsystems had actionable work
-            // this tick. When work IS happening, fibers yield naturally
-            // via Pause::new() / Fiber::suspend(), so we don't need
-            // extra delay. When idle (e.g. waiting for a child process
-            // to finish or a stream to become ready), the sleep prevents
-            // a hot spin loop.
+            if ($poolBooted) {
+                $pool = RuntimeFiberPool::getInstance();
+                $pool->tick();
+                if ($pool->hasPendingTasks() || $pool->hasCooperativeTasks()) {
+                    $didWork = true;
+                }
+            }
+
             if (!$didWork) {
                 usleep(self::IDLE_SLEEP_US);
             }

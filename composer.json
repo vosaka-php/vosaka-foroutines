@@ -1,6 +1,6 @@
 {
     "name": "venndev/vosaka-fourotines",
-    "description": "Structured async programming for PHP using Fibers, inspired by Kotlin Coroutines. Features AsyncIO (non-blocking streams), ForkProcess (low-overhead child processes), Flow/SharedFlow/StateFlow with backpressure, Channels, Mutex, and cooperative scheduling. Can integrate with VOsaka.",
+    "description": "Structured async programming for PHP using Fibers, inspired by Kotlin Coroutines and Erlang/OTP. Features AsyncIO (non-blocking streams), ForkProcess (low-overhead child processes), Flow/SharedFlow/StateFlow with backpressure, Channels, Mutex, RuntimeFiberPool (global fiber reuse engine integrated into Launch/Async/RunBlocking), FiberPool (zero-allocation batch task submission), Actor Model (mailbox-based message passing), OTP-style Supervisor trees (let-it-crash fault tolerance), and cooperative scheduling. Can integrate with VOsaka.",
     "type": "library",
     "license": "LGPL-2.1-only",
     "keywords": [
@@ -12,7 +12,12 @@
         "flow",
         "channel",
         "backpressure",
-        "kotlin"
+        "kotlin",
+        "actor-model",
+        "supervisor",
+        "fiber-pool",
+        "fault-tolerance",
+        "erlang-otp"
     ],
     "autoload": {
         "psr-4": {

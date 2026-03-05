@@ -11,6 +11,17 @@ use Generator;
  * RunBlocking is a utility class that allows you to run multiple fibers synchronously
  * until all of them complete. It is useful for testing or when you need to block the
  * current thread until all asynchronous tasks are finished.
+ *
+ * RuntimeFiberPool integration:
+ * The main scheduler loop now ticks the global RuntimeFiberPool on every
+ * iteration. This drives:
+ *   - Pending task dispatch (tasks queued because all pool fibers were busy)
+ *   - Auto-scaling evaluation (spawn/shrink worker shells based on load)
+ *   - Cooperative fiber lifecycle management
+ *
+ * The pool tick is lightweight (~0.1µs when idle) and ensures that pool-managed
+ * fibers created by Launch/Async inside the RunBlocking scope make progress
+ * alongside regular fibers and WorkerPool tasks.
  */
 final class RunBlocking
 {
@@ -83,9 +94,9 @@ final class RunBlocking
         }
 
         // Phase 1: Drive the main fiber until it terminates.
-        // Each iteration also ticks AsyncIO, WorkerPool, and Launch queue
-        // so that child fibers / IO workers / stream watchers can make
-        // progress concurrently.
+        // Each iteration also ticks AsyncIO, WorkerPool, Launch queue,
+        // and RuntimeFiberPool so that child fibers / IO workers / stream
+        // watchers / pooled cooperative fibers can make progress concurrently.
         while (FiberUtils::fiberStillRunning($callable)) {
             $didWork = false;
 
@@ -108,6 +119,20 @@ final class RunBlocking
                 $didWork = true;
             }
 
+            // Tick RuntimeFiberPool — dispatch pending tasks to idle
+            // worker shells and evaluate auto-scaling. This ensures
+            // pool-managed fibers created by Launch/Async inside this
+            // RunBlocking scope get their tasks dispatched promptly.
+            // Also count cooperative tasks as work — they are mid-execution
+            // inside pool worker shells and need the loop to keep spinning.
+            if (RuntimeFiberPool::isBooted()) {
+                $pool = RuntimeFiberPool::getInstance();
+                $pool->tick();
+                if ($pool->hasPendingTasks() || $pool->hasCooperativeTasks()) {
+                    $didWork = true;
+                }
+            }
+
             if ($callable->isSuspended()) {
                 $callable->resume();
                 $didWork = true;
@@ -121,12 +146,25 @@ final class RunBlocking
             }
         }
 
-        // Phase 2: Drain any remaining Launch jobs and WorkerPool tasks
-        // that were spawned by the main fiber before it terminated.
+        // Phase 2: Drain any remaining Launch jobs, WorkerPool tasks,
+        // and RuntimeFiberPool pending work that were spawned by the
+        // main fiber before it terminated.
+        //
+        // IMPORTANT: also check hasCooperativeTasks() — tasks that have
+        // already been dispatched into pool worker shells are NOT in
+        // Launch::$queue or pendingTasks, they live in cooperativeActive.
+        // Without this check, Phase 2 exits too early while pool-managed
+        // fibers (e.g. from Launch::new + Delay) are still executing,
+        // causing a deadlock / silent hang.
+        $poolBooted = RuntimeFiberPool::isBooted();
         while (
             count(Launch::$queue) > 0 ||
             !WorkerPool::isEmpty() ||
-            AsyncIO::hasPending()
+            AsyncIO::hasPending() ||
+            ($poolBooted &&
+                RuntimeFiberPool::getInstance()->hasPendingTasks()) ||
+            ($poolBooted &&
+                RuntimeFiberPool::getInstance()->hasCooperativeTasks())
         ) {
             $didWork = false;
 
@@ -144,6 +182,16 @@ final class RunBlocking
             if (!Launch::$queue->isEmpty()) {
                 Launch::getInstance()->runOnce();
                 $didWork = true;
+            }
+
+            // Tick the RuntimeFiberPool to dispatch any remaining
+            // pending tasks, drive cooperative fibers, and handle auto-scaling.
+            if ($poolBooted) {
+                $pool = RuntimeFiberPool::getInstance();
+                $pool->tick();
+                if ($pool->hasPendingTasks() || $pool->hasCooperativeTasks()) {
+                    $didWork = true;
+                }
             }
 
             if (!$didWork) {
