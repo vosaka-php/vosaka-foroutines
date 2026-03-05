@@ -88,10 +88,26 @@ class Mutex
      */
     private function detectBestLockType(): string
     {
-        // Priority order: semaphore > apcu > file
-        if ($this->isSemaphoreAvailable()) {
-            return self::LOCK_SEMAPHORE;
-        } elseif ($this->isApcuAvailable()) {
+        // Priority order: file > apcu > semaphore
+        //
+        // File-based locking (flock) is the safest default:
+        //   - Always available on every platform
+        //   - Each lock file is unique per mutex name — no key collisions
+        //   - No persistent kernel state that survives process crashes
+        //   - Reentrant-safe per file handle within the same process
+        //
+        // SysV semaphores are deliberately last because:
+        //   - sem_get() maps names to integer keys via hashing, which can
+        //     collide (two different mutex names → same key → deadlock)
+        //   - Semaphores are kernel-persistent: if a process crashes without
+        //     sem_release(), the semaphore stays locked until manual cleanup
+        //   - They are non-reentrant: the same process acquiring twice will
+        //     deadlock unless guarded (our isLocked flag only guards the
+        //     same Mutex instance, not different instances sharing a key)
+        //
+        // Users who specifically need inter-process semaphore locking can
+        // still request it explicitly with LOCK_SEMAPHORE.
+        if ($this->isApcuAvailable()) {
             return self::LOCK_APCU;
         } else {
             return self::LOCK_FILE;
