@@ -73,6 +73,33 @@ final class WorkerLifecycle
      */
     public static function respawnWorker(int $index): void
     {
+        // ── Backoff gate: skip if cooldown hasn't elapsed ────────────
+        $now = microtime(true);
+        $nextAllowed = WorkerPoolState::$respawnNextAllowed[$index] ?? 0.0;
+        if ($now < $nextAllowed) {
+            // Still cooling down — caller will retry on the next tick
+            return;
+        }
+
+        // ── Circuit-breaker: too many consecutive failures ───────────
+        $attempts = WorkerPoolState::$respawnAttempts[$index] ?? 0;
+        if ($attempts >= WorkerPoolState::$maxRespawnAttempts) {
+            error_log(
+                "WorkerPool: Worker {$index} exceeded max respawn attempts " .
+                "({$attempts}/" . WorkerPoolState::$maxRespawnAttempts .
+                "). Removing worker slot.",
+            );
+            // Remove the worker slot entirely
+            unset(WorkerPoolState::$workers[$index]);
+            unset(WorkerPoolState::$activeTasks[$index]);
+            unset(WorkerPoolState::$readBuffers[$index]);
+            unset(WorkerPoolState::$workerIdleSince[$index]);
+            unset(WorkerPoolState::$respawnAttempts[$index]);
+            unset(WorkerPoolState::$respawnNextAllowed[$index]);
+            return;
+        }
+
+        // ── Cleanup old worker resources ─────────────────────────────
         $worker = WorkerPoolState::$workers[$index] ?? null;
 
         if ($worker !== null) {
@@ -84,6 +111,18 @@ final class WorkerLifecycle
         }
 
         WorkerPoolState::$readBuffers[$index] = "";
+
+        // ── Increment attempt counter & compute next backoff ─────────
+        $attempts++;
+        WorkerPoolState::$respawnAttempts[$index] = $attempts;
+
+        // Exponential backoff: base × 2^(attempt-1), capped at 30s
+        $delayMs = min(
+            WorkerPoolState::$respawnBaseDelayMs * (1 << ($attempts - 1)),
+            30_000,
+        );
+        WorkerPoolState::$respawnNextAllowed[$index] =
+            $now + ($delayMs / 1000.0);
 
         try {
             if (WorkerPoolState::canUseFork()) {
@@ -98,10 +137,24 @@ final class WorkerLifecycle
                 "mode" => WorkerPoolState::canUseFork() ? "fork" : "socket",
             ];
             error_log(
-                "WorkerPool: Failed to respawn worker {$index}: " .
-                    $e->getMessage(),
+                "WorkerPool: Failed to respawn worker {$index} " .
+                "(attempt {$attempts}): " . $e->getMessage(),
             );
         }
+    }
+
+    /**
+     * Reset the backoff counters for a worker slot.
+     *
+     * Called when a worker successfully completes a task, proving it is
+     * healthy and breaking the consecutive-failure streak.
+     *
+     * @param int $index Worker slot index.
+     */
+    public static function resetBackoff(int $index): void
+    {
+        unset(WorkerPoolState::$respawnAttempts[$index]);
+        unset(WorkerPoolState::$respawnNextAllowed[$index]);
     }
 
     /**
@@ -155,5 +208,7 @@ final class WorkerLifecycle
     }
 
     /** Prevent instantiation */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 }

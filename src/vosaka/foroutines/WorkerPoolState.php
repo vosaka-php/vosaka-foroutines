@@ -220,6 +220,49 @@ final class WorkerPoolState
      */
     public static array $workerIdleSince = [];
 
+    // ─── Respawn Backoff ─────────────────────────────────────────────
+
+    /**
+     * Per-worker consecutive respawn attempt count.
+     *
+     * Reset to 0 when a worker successfully completes a task (proving
+     * it is healthy). Incremented on each respawnWorker() call.
+     *
+     * @var array<int, int>
+     */
+    public static array $respawnAttempts = [];
+
+    /**
+     * Per-worker earliest-allowed respawn time (microtime(true)).
+     *
+     * When a worker is respawned, the next respawn is delayed by an
+     * exponential backoff. If the current time is before this value,
+     * the respawn is skipped (caller will retry on the next tick).
+     *
+     * @var array<int, float>
+     */
+    public static array $respawnNextAllowed = [];
+
+    /**
+     * Maximum consecutive respawn attempts before circuit-breaking.
+     *
+     * After this many consecutive failures the worker slot is removed
+     * entirely to prevent infinite CPU-spinning respawn loops.
+     *
+     * @var int
+     */
+    public static int $maxRespawnAttempts = 10;
+
+    /**
+     * Base delay in milliseconds for exponential backoff.
+     *
+     * First retry waits $respawnBaseDelayMs, second waits 2×, third
+     * waits 4×, etc. Capped at 30 000 ms (30 s).
+     *
+     * @var int
+     */
+    public static int $respawnBaseDelayMs = 100;
+
     // ─── Helpers ─────────────────────────────────────────────────────
 
     /**
@@ -246,6 +289,8 @@ final class WorkerPoolState
         self::$workerIdleSince = [];
         self::$lastScaleUpTime = 0.0;
         self::$lastScaleDownTime = 0.0;
+        self::$respawnAttempts = [];
+        self::$respawnNextAllowed = [];
     }
 
     /**
@@ -336,5 +381,7 @@ final class WorkerPoolState
     }
 
     /** Prevent instantiation */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 }

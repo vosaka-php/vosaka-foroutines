@@ -23,6 +23,7 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 │  │  │ stream_select │  child procs    │  fiber resume  │   │    │
 │  │  └───────────────┴─────────────────┴────────────────┘   │    │
 │  │                                                         │    │
+│  │  FiberPool: reusable Fiber instances (default: 10)      │    │
 │  │  Idle detection → usleep(500µs) to prevent CPU spin     │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
@@ -44,8 +45,8 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐    │
 │  │  Flow (cold) │  │ SharedFlow / │  │  WorkerPool          │    │
 │  │  + buffer()  │  │ StateFlow    │  │  (task batching +    │    │
-│  │  operator    │  │ (hot, back-  │  │   dynamic scaling)   │    │
-│  │              │  │  pressure)   │  │                      │    │
+│  │  operator    │  │ (hot, back-  │  │   dynamic scaling +  │    │
+│  │              │  │  pressure)   │  │   respawn backoff)   │    │
 │  └─────────────┘  └─────────────┘  └──────────────────────┘    │
 │                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐    │
@@ -53,6 +54,12 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 │  │  (multi-proc │  │  (channel    │  │  (cancel, join,      │    │
 │  │   file/sem)  │  │   multiplex) │  │   invokeOnComplete)  │    │
 │  └─────────────┘  └─────────────┘  └──────────────────────┘    │
+│                                                                 │
+│  ┌─────────────┐  ┌──────────────────────────────────────┐     │
+│  │  Actor Model │  │  Supervisor Tree (OTP-style)          │     │
+│  │  (mailbox +  │  │  ONE_FOR_ONE / ONE_FOR_ALL /          │     │
+│  │   message)   │  │  REST_FOR_ONE + restart budget         │     │
+│  └─────────────┘  └──────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,13 +69,19 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 
 **Dispatchers** — `DEFAULT` (fibers + AsyncIO), `IO` (child process via WorkerPool), `MAIN` (event loop)
 
-**WorkerPool** — Pre-spawned long-lived worker processes with task batching and dynamic pool sizing
+**WorkerPool** — Pre-spawned long-lived worker processes with task batching, dynamic pool sizing, and respawn backoff
+
+**FiberPool** — Reusable Fiber instances for scheduler optimization (default: 10, dynamic sizing)
 
 **Channel** — Four transports: in-process, socket pool (default), socket per-channel, file-based
 
 **AsyncIO** — Non-blocking stream I/O via `stream_select()` (TCP, TLS, HTTP, files, DNS)
 
 **Flow** — Cold `Flow`, `SharedFlow`, `StateFlow` with backpressure (`SUSPEND`, `DROP_OLDEST`, `DROP_LATEST`, `ERROR`)
+
+**Actor Model** — Message-passing concurrency with Channel-based mailboxes and `ActorSystem` registry
+
+**Supervisor Tree** — OTP-style supervision with `ONE_FOR_ONE`, `ONE_FOR_ALL`, `REST_FOR_ONE` strategies
 
 **Sync** — `Mutex` (file, semaphore, APCu), `Select` for channel multiplexing
 
@@ -81,11 +94,11 @@ A PHP library for structured asynchronous programming using foroutines (fiber + 
 - PHP 8.2+
 - ext-shmop, ext-fileinfo, ext-zlib
 
-| Optional Extension | Purpose |
-|---|---|
-| ext-pcntl | Low-overhead IO dispatch via `pcntl_fork()` (~1-5ms vs ~50-200ms) |
-| ext-sysvsem | Semaphore-based `Mutex` |
-| ext-apcu | APCu-based `Mutex` |
+| Optional Extension | Purpose                                                           |
+| ------------------ | ----------------------------------------------------------------- |
+| ext-pcntl          | Low-overhead IO dispatch via `pcntl_fork()` (~1-5ms vs ~50-200ms) |
+| ext-sysvsem        | Semaphore-based `Mutex`                                           |
+| ext-apcu           | APCu-based `Mutex`                                                |
 
 ## Installation
 
@@ -211,12 +224,12 @@ $job->cancelAfter(2.0);
 
 ### Channel
 
-| Mode | Factory | Use Case |
-|---|---|---|
-| In-process | `Channel::new(capacity)` | Fibers in the same process |
-| Socket pool (default) | `Channel::create(capacity)` | IPC via shared `ChannelBrokerPool` |
-| Socket per-channel | `Channel::newSocketInterProcess(name, capacity)` | Legacy — 1 process per channel |
-| File-based | `Channel::newInterProcess(name, capacity)` | IPC via temp file + mutex |
+| Mode                  | Factory                                          | Use Case                           |
+| --------------------- | ------------------------------------------------ | ---------------------------------- |
+| In-process            | `Channel::new(capacity)`                         | Fibers in the same process         |
+| Socket pool (default) | `Channel::create(capacity)`                      | IPC via shared `ChannelBrokerPool` |
+| Socket per-channel    | `Channel::newSocketInterProcess(name, capacity)` | Legacy — 1 process per channel     |
+| File-based            | `Channel::newInterProcess(name, capacity)`       | IPC via temp file + mutex          |
 
 ```php
 use vosaka\foroutines\channel\Channel;
@@ -325,18 +338,18 @@ $socket = AsyncIO::tcpConnect('example.com', 80)->await();
 $ip     = AsyncIO::dnsResolve('example.com')->await();
 ```
 
-| Method | Returns | Description |
-|---|---|---|
-| `tcpConnect(host, port)->await()` | `resource` | Non-blocking TCP connection |
-| `tlsConnect(host, port)->await()` | `resource` | Non-blocking TLS/SSL connection |
-| `streamRead(stream, maxBytes)->await()` | `string` | Read up to N bytes |
-| `streamReadAll(stream)->await()` | `string` | Read until EOF |
-| `streamWrite(stream, data)->await()` | `int` | Write data |
-| `httpGet(url)->await()` | `string` | HTTP GET |
-| `httpPost(url, body)->await()` | `string` | HTTP POST |
-| `fileGetContents(path)->await()` | `string` | Read entire file |
-| `filePutContents(path, data)->await()` | `int` | Write file |
-| `dnsResolve(hostname)->await()` | `string` | Resolve hostname to IP |
+| Method                                  | Returns    | Description                     |
+| --------------------------------------- | ---------- | ------------------------------- |
+| `tcpConnect(host, port)->await()`       | `resource` | Non-blocking TCP connection     |
+| `tlsConnect(host, port)->await()`       | `resource` | Non-blocking TLS/SSL connection |
+| `streamRead(stream, maxBytes)->await()` | `string`   | Read up to N bytes              |
+| `streamReadAll(stream)->await()`        | `string`   | Read until EOF                  |
+| `streamWrite(stream, data)->await()`    | `int`      | Write data                      |
+| `httpGet(url)->await()`                 | `string`   | HTTP GET                        |
+| `httpPost(url, body)->await()`          | `string`   | HTTP POST                       |
+| `fileGetContents(path)->await()`        | `string`   | Read entire file                |
+| `filePutContents(path, data)->await()`  | `int`      | Write file                      |
+| `dnsResolve(hostname)->await()`         | `string`   | Resolve hostname to IP          |
 
 ### Mutex
 
@@ -350,11 +363,11 @@ Mutex::protect('my-resource', function () {
 
 ### Dispatchers
 
-| Dispatcher | Description |
-|---|---|
-| `DEFAULT` | Runs in the current fiber context (+ AsyncIO for non-blocking streams) |
-| `IO` | Offloads to a worker process via WorkerPool |
-| `MAIN` | Schedules on the main event loop |
+| Dispatcher | Description                                                            |
+| ---------- | ---------------------------------------------------------------------- |
+| `DEFAULT`  | Runs in the current fiber context (+ AsyncIO for non-blocking streams) |
+| `IO`       | Offloads to a worker process via WorkerPool                            |
+| `MAIN`     | Schedules on the main event loop                                       |
 
 ```php
 use vosaka\foroutines\{RunBlocking, Launch, Dispatchers, Thread};
@@ -395,11 +408,11 @@ use vosaka\foroutines\WorkerPool;
 WorkerPool::setBatchSize(5);
 ```
 
-| Batch Size | Behavior |
-|---|---|
+| Batch Size  | Behavior                                                |
+| ----------- | ------------------------------------------------------- |
 | 1 (default) | Original single-task protocol — lowest latency per task |
-| 5–10 | Good balance for many small/fast tasks |
-| 20–50 | Maximum throughput for trivial tasks |
+| 5–10        | Good balance for many small/fast tasks                  |
+| 20–50       | Maximum throughput for trivial tasks                    |
 
 Batching is fully backward compatible — when `batchSize=1`, the pool uses the original `TASK:`/`RESULT:` protocol.
 
@@ -433,42 +446,121 @@ Workload drops:    8 workers → 6 → 4 → 2 (min, after idle timeout)
 
 When dynamic scaling is disabled (default), the pool behaves exactly as before — a fixed number of workers.
 
+#### Worker Respawn Backoff
+
+When a worker crashes repetitively, respawning uses exponential backoff (100ms → 200ms → … max 30s) to prevent CPU spin. After 10 consecutive failures, the worker slot is removed (circuit-breaker).
+
+```php
+// Customizable
+WorkerPoolState::$maxRespawnAttempts = 10;
+WorkerPoolState::$respawnBaseDelayMs = 100;
+```
+
+### FiberPool
+
+Reusable Fiber instances to reduce allocation overhead. Integrated into `Launch`, `Async`, `RunBlocking`.
+
+```php
+use vosaka\foroutines\FiberPool;
+
+// Adjust global pool size
+FiberPool::setDefaultSize(20);
+
+// Direct usage (zero-alloc reuse after first run)
+$pool = new FiberPool(maxSize: 10);
+$result = $pool->run(fn() => heavyComputation());
+```
+
+### Actor Model
+
+```php
+use vosaka\foroutines\actor\{Actor, Message, ActorSystem};
+
+class GreeterActor extends Actor {
+    protected function receive(Message $msg): void {
+        echo "Hello, {$msg->payload}!\n";
+    }
+}
+
+main(function () {
+    RunBlocking::new(function () {
+        $system = ActorSystem::new()
+            ->register(new GreeterActor('greeter'));
+
+        $system->startAll();
+        $system->send('greeter', Message::of('greet', 'World'));
+
+        Delay::new(100);
+        $system->stopAll();
+        Thread::await();
+    });
+});
+```
+
+### Supervisor Tree
+
+OTP-style supervision with automatic restart on child failure.
+
+```php
+use vosaka\foroutines\supervisor\{Supervisor, RestartStrategy};
+
+main(function () {
+    RunBlocking::new(function () {
+        Supervisor::new(RestartStrategy::ONE_FOR_ONE)
+            ->child(fn() => workerA(), 'worker-a')
+            ->child(fn() => workerB(), 'worker-b', maxRestarts: 5)
+            ->start();
+
+        Thread::await();
+    });
+});
+```
+
+| Strategy       | Behavior                                     |
+| -------------- | -------------------------------------------- |
+| `ONE_FOR_ONE`  | Restart only the crashed child               |
+| `ONE_FOR_ALL`  | Restart all children                         |
+| `REST_FOR_ONE` | Restart crashed child + all started after it |
+
 ### ForkProcess
 
 On Linux/macOS, `ForkProcess` creates child processes by forking the current process instead of spawning a new interpreter:
 
-| Strategy | Overhead | Closure Serialization |
-|---|---|---|
-| `ForkProcess` (pcntl_fork) | ~1-5ms | Not needed (memory copied) |
-| `Process` (symfony/process) | ~50-200ms | Required |
+| Strategy                    | Overhead  | Closure Serialization      |
+| --------------------------- | --------- | -------------------------- |
+| `ForkProcess` (pcntl_fork)  | ~1-5ms    | Not needed (memory copied) |
+| `Process` (symfony/process) | ~50-200ms | Required                   |
 
 Selection is automatic — `Worker` uses fork when available, falls back to `symfony/process` on Windows.
 
 ## Platform Support
 
-| Feature | Linux/macOS | Windows |
-|---|---|---|
-| Fibers (core) | ✅ | ✅ |
-| AsyncIO (stream_select) | ✅ | ✅ |
-| Channel (all transports) | ✅ | ✅ |
-| WorkerPool (fork mode) | ✅ | ❌ (uses socket mode) |
-| WorkerPool (socket mode) | ✅ | ✅ |
-| ForkProcess (pcntl_fork) | ✅ | ❌ (fallback to symfony/process) |
-| Mutex (file lock) | ✅ | ✅ |
-| Mutex (semaphore) | ✅ (ext-sysvsem) | ❌ |
-| Mutex (APCu) | ✅ (ext-apcu) | ✅ (ext-apcu) |
+| Feature                  | Linux/macOS      | Windows                          |
+| ------------------------ | ---------------- | -------------------------------- |
+| Fibers (core)            | ✅               | ✅                               |
+| FiberPool                | ✅               | ✅                               |
+| AsyncIO (stream_select)  | ✅               | ✅                               |
+| Channel (all transports) | ✅               | ✅                               |
+| Actor Model              | ✅               | ✅                               |
+| Supervisor Tree          | ✅               | ✅                               |
+| WorkerPool (fork mode)   | ✅               | ❌ (uses socket mode)            |
+| WorkerPool (socket mode) | ✅               | ✅                               |
+| ForkProcess (pcntl_fork) | ✅               | ❌ (fallback to symfony/process) |
+| Mutex (file lock)        | ✅               | ✅                               |
+| Mutex (semaphore)        | ✅ (ext-sysvsem) | ❌                               |
+| Mutex (APCu)             | ✅ (ext-apcu)    | ✅ (ext-apcu)                    |
 
 ## Comparison with JavaScript Async
 
-| Aspect | Node.js | VOsaka Foroutines |
-|---|---|---|
-| Runtime | libuv event loop (C) | PHP Fibers + stream_select |
-| I/O model | Non-blocking by default | `AsyncIO` for streams; `Dispatchers::IO` for blocking APIs |
-| Concurrency | Single-threaded + worker threads | Single process + child processes (fork/spawn) |
-| Syntax | `async/await` (language-level) | `Async::new()->await()` / `Async::awaitAll()` (library-level) |
-| Worker pool | `worker_threads` | `WorkerPool` with task batching + dynamic scaling |
-| IPC channels | `MessagePort` | `Channel::create()` (shared TCP pool) |
-| Flow control | Node.js Streams | `BackpressureStrategy` (SUSPEND/DROP/ERROR) |
+| Aspect       | Node.js                          | VOsaka Foroutines                                             |
+| ------------ | -------------------------------- | ------------------------------------------------------------- |
+| Runtime      | libuv event loop (C)             | PHP Fibers + stream_select                                    |
+| I/O model    | Non-blocking by default          | `AsyncIO` for streams; `Dispatchers::IO` for blocking APIs    |
+| Concurrency  | Single-threaded + worker threads | Single process + child processes (fork/spawn)                 |
+| Syntax       | `async/await` (language-level)   | `Async::new()->await()` / `Async::awaitAll()` (library-level) |
+| Worker pool  | `worker_threads`                 | `WorkerPool` with task batching + dynamic scaling             |
+| IPC channels | `MessagePort`                    | `Channel::create()` (shared TCP pool)                         |
+| Flow control | Node.js Streams                  | `BackpressureStrategy` (SUSPEND/DROP/ERROR)                   |
 
 ## License
 

@@ -45,7 +45,7 @@ final class RunBlocking
      */
     public static function new(
         callable|Generator|Async|Fiber $callable,
-        Dispatchers $dispatchers = Dispatchers::DEFAULT,
+        Dispatchers $dispatchers = Dispatchers::DEFAULT ,
     ): void {
         // NOTE: Dispatchers::IO on RunBlocking is treated the same as
         // DEFAULT. The closure typically contains scheduler primitives
@@ -70,7 +70,12 @@ final class RunBlocking
         Launch::getInstance();
 
         if (!$callable instanceof Fiber) {
-            $callable = FiberUtils::makeFiber($callable);
+            // Fast-path: use FiberPool for Closure callables
+            if ($callable instanceof \Closure) {
+                $callable = FiberPool::global()->acquire($callable);
+            } else {
+                $callable = FiberUtils::makeFiber($callable);
+            }
         }
 
         if ($dispatchers === Dispatchers::MAIN) {

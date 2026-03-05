@@ -16,7 +16,9 @@ use InvalidArgumentException;
  */
 final class Async
 {
-    public function __construct(public ?Fiber $fiber) {}
+    public function __construct(public ?Fiber $fiber)
+    {
+    }
 
     /**
      * Creates a new asynchronous task.
@@ -27,7 +29,7 @@ final class Async
      */
     public static function new(
         callable|Generator $callable,
-        Dispatchers $dispatcher = Dispatchers::DEFAULT,
+        Dispatchers $dispatcher = Dispatchers::DEFAULT ,
     ): Async {
         if ($dispatcher === Dispatchers::IO) {
             return WorkerPool::addAsync($callable);
@@ -39,7 +41,12 @@ final class Async
             return new self($fiber);
         }
 
-        $fiber = FiberUtils::makeFiber($callable);
+        // Fast-path: use FiberPool for Closure callables
+        if ($callable instanceof \Closure) {
+            $fiber = FiberPool::global()->acquire($callable);
+        } else {
+            $fiber = FiberUtils::makeFiber($callable);
+        }
         return new self($fiber);
     }
 

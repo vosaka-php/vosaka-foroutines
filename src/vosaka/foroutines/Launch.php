@@ -119,7 +119,7 @@ final class Launch extends Job
      */
     public static function new(
         callable|Generator|Async|Fiber $callable,
-        Dispatchers $dispatcher = Dispatchers::DEFAULT,
+        Dispatchers $dispatcher = Dispatchers::DEFAULT ,
     ): Launch {
         if ($dispatcher === Dispatchers::IO) {
             // Arrow function: lighter than function() use() — no explicit
@@ -145,8 +145,13 @@ final class Launch extends Job
         // without going through FiberUtils::makeFiber() which performs
         // reflection-based Generator detection. This saves ~2-5µs per
         // task for simple callables (the common case).
+        //
+        // FiberPool::global() is used to track creation statistics for
+        // dynamic sizing decisions. The acquire() method creates a
+        // standard Fiber (not a pool-loop fiber) because the scheduler
+        // needs full lifecycle control.
         if ($callable instanceof \Closure) {
-            $fiber = new Fiber($callable);
+            $fiber = FiberPool::global()->acquire($callable);
         } else {
             $fiber = FiberUtils::makeFiber($callable);
         }
@@ -313,5 +318,6 @@ final class Launch extends Job
             }
         }
         self::$poolInitialized = false;
+        FiberPool::resetState();
     }
 }

@@ -24,6 +24,7 @@ final class EventLoop
     public static function resetState(): void
     {
         self::$queue = null;
+        FiberPool::resetState();
     }
 
     public function __construct()
@@ -42,9 +43,9 @@ final class EventLoop
                 } catch (Throwable $e) {
                     error_log(
                         "Error during EventLoop shutdown: " .
-                            $e->getMessage() .
-                            "\n" .
-                            $e->getTraceAsString(),
+                        $e->getMessage() .
+                        "\n" .
+                        $e->getTraceAsString(),
                     );
                 }
             });

@@ -327,6 +327,8 @@ final class TaskDispatcher
                     unset(WorkerPoolState::$activeTasks[$i]);
                     // Record when this worker became idle (for dynamic scaling)
                     WorkerPoolState::$workerIdleSince[$i] = microtime(true);
+                    // Worker completed a task successfully — reset backoff
+                    WorkerLifecycle::resetBackoff($i);
                     continue;
                 }
 
@@ -363,11 +365,11 @@ final class TaskDispatcher
                             $decoded = base64_decode($payload, true);
                             $errorData =
                                 $decoded !== false
-                                    ? unserialize($decoded)
-                                    : null;
+                                ? unserialize($decoded)
+                                : null;
                             $message = is_array($errorData)
                                 ? $errorData["message"] ??
-                                    "Unknown worker error"
+                                "Unknown worker error"
                                 : "Unknown worker error";
                             WorkerPoolState::$returns[$taskId] =
                                 "Error: " . $message;
@@ -494,8 +496,8 @@ final class TaskDispatcher
                         $errorDecoded = base64_decode($payload, true);
                         $errorData =
                             $errorDecoded !== false
-                                ? unserialize($errorDecoded)
-                                : null;
+                            ? unserialize($errorDecoded)
+                            : null;
                         $message = is_array($errorData)
                             ? $errorData["message"] ?? "Unknown worker error"
                             : "Unknown worker error";
@@ -523,5 +525,7 @@ final class TaskDispatcher
     }
 
     /** Prevent instantiation */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 }
