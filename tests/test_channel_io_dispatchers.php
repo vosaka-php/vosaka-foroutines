@@ -84,7 +84,7 @@ use vosaka\foroutines\Thread;
 use vosaka\foroutines\channel\Channel;
 use vosaka\foroutines\channel\Channels;
 
-use function vosaka\foroutines\main;
+use vosaka\foroutines\AsyncMain;
 
 /**
  * Safely tear down a channel (close + cleanup).
@@ -101,7 +101,9 @@ function teardown(Channel $ch): void
     $ch->cleanup();
 }
 
-main(function () {
+#[AsyncMain]
+function main()
+{
     // ================================================================
     // Test 1: IO producer -> main consumer
     //
@@ -501,4 +503,4 @@ main(function () {
     var_dump("Test 10 passed");
 
     var_dump("All Channel IO Dispatcher tests passed!");
-});
+}

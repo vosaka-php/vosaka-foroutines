@@ -193,6 +193,12 @@ final class ForkWorkerManager
                     self::forkWorkerExecuteTask($socket, $payload);
                     continue;
                 }
+
+                if (str_starts_with($line, "BATCH:")) {
+                    $payload = substr($line, 6);
+                    self::forkWorkerExecuteBatch($socket, $payload);
+                    continue;
+                }
             }
         }
 
@@ -270,6 +276,118 @@ final class ForkWorkerManager
         }
 
         // Signal readiness for next task
+        WorkerPoolCommunication::socketWriteLine($socket, "READY");
+    }
+
+    /**
+     * Execute a batch of tasks in the fork-based worker child process.
+     *
+     * Deserializes the batch payload (base64 → JSON array of task entries),
+     * executes each closure sequentially, collects all results, and sends
+     * them back as a single BATCH_RESULTS: message followed by READY.
+     *
+     * Protocol:
+     *   Input:  BATCH:<base64(json([{"payload":"<base64closure>","id":<int>}, ...]))>
+     *   Output: BATCH_RESULTS:<base64(json([{"id":<int>,"type":"result"|"error","payload":"<base64>"}, ...]))>
+     *           READY
+     *
+     * @param \Socket $socket        The child's socket to write results to.
+     * @param string  $base64Payload Base64-encoded JSON array of task entries.
+     */
+    private static function forkWorkerExecuteBatch(
+        \Socket $socket,
+        string $base64Payload,
+    ): void {
+        $results = [];
+
+        try {
+            $decoded = base64_decode($base64Payload, true);
+            if ($decoded === false) {
+                throw new \RuntimeException(
+                    "Failed to base64_decode batch payload",
+                );
+            }
+
+            $tasks = json_decode($decoded, true);
+            if (!is_array($tasks)) {
+                throw new \RuntimeException(
+                    "Failed to json_decode batch payload",
+                );
+            }
+
+            foreach ($tasks as $taskEntry) {
+                $taskId = $taskEntry["id"] ?? null;
+                $taskPayload = $taskEntry["payload"] ?? null;
+
+                if ($taskId === null || $taskPayload === null) {
+                    continue;
+                }
+
+                try {
+                    $closureDecoded = base64_decode($taskPayload, true);
+                    if ($closureDecoded === false) {
+                        throw new \RuntimeException(
+                            "Failed to base64_decode task payload",
+                        );
+                    }
+
+                    /** @var SerializableClosure $sc */
+                    $sc = unserialize($closureDecoded);
+                    $closure = $sc->getClosure();
+
+                    $result = $closure();
+
+                    // If Generator, exhaust it
+                    if ($result instanceof \Generator) {
+                        $genResult = null;
+                        while ($result->valid()) {
+                            $genResult = $result->current();
+                            $result->next();
+                        }
+                        try {
+                            $returnValue = $result->getReturn();
+                            if ($returnValue !== null) {
+                                $genResult = $returnValue;
+                            }
+                        } catch (\Exception) {
+                        }
+                        $result = $genResult;
+                    }
+
+                    $results[] = [
+                        "id" => $taskId,
+                        "type" => "result",
+                        "payload" => base64_encode(serialize($result)),
+                    ];
+                } catch (\Throwable $e) {
+                    $errorData = [
+                        "__worker_error__" => true,
+                        "message" => $e->getMessage(),
+                        "file" => $e->getFile(),
+                        "line" => $e->getLine(),
+                        "trace" => $e->getTraceAsString(),
+                    ];
+                    $results[] = [
+                        "id" => $taskId,
+                        "type" => "error",
+                        "payload" => base64_encode(serialize($errorData)),
+                    ];
+                }
+            }
+        } catch (\Throwable $e) {
+            // Entire batch decode failed — nothing we can return per-task
+            // The parent will handle missing results via dead-worker check.
+        }
+
+        // Send all results in a single message
+        $batchJson = json_encode($results, JSON_UNESCAPED_SLASHES);
+        $batchEncoded = base64_encode($batchJson);
+        WorkerPoolCommunication::socketWriteLine(
+            $socket,
+            "BATCH_RESULTS:" . $batchEncoded,
+        );
+
+        // Signal readiness for next task/batch
         WorkerPoolCommunication::socketWriteLine($socket, "READY");
     }
 

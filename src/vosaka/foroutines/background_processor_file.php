@@ -28,9 +28,11 @@ function findAutoload(string $startDir, int $maxDepth = 10): string
         $dir = $parent;
     }
 
-    throw new RuntimeException(
-        "Cannot find vendor/autoload.php (searched from: $startDir)",
+    fwrite(
+        STDERR,
+        "background_processor_file: Could not find vendor/autoload.php (searched from: $startDir)\n",
     );
+    exit(1);
 }
 
 require_once findAutoload(__DIR__);

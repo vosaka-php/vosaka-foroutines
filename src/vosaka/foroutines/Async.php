@@ -6,6 +6,7 @@ namespace vosaka\foroutines;
 
 use Fiber;
 use Generator;
+use InvalidArgumentException;
 
 /**
  * Class Async
@@ -40,6 +41,158 @@ final class Async
 
         $fiber = FiberUtils::makeFiber($callable);
         return new self($fiber);
+    }
+
+    /**
+     * Awaits multiple Async instances concurrently and returns all results.
+     *
+     * This method drives all provided Async tasks forward simultaneously
+     * rather than awaiting them one-by-one sequentially. This is important
+     * because sequential awaiting (e.g. $a->await(); $b->await();) means
+     * the second task only starts making progress after the first completes,
+     * whereas awaitAll() interleaves their execution on every tick.
+     *
+     * Returns an array of results in the same order as the input Async
+     * instances. If called with named arguments or an explicit array,
+     * the keys are preserved.
+     *
+     * Usage:
+     *   [$a, $b, $c] = Async::awaitAll($asyncA, $asyncB, $asyncC);
+     *
+     *   // Or with an array:
+     *   $results = Async::awaitAll(...$arrayOfAsyncs);
+     *
+     * @param Async ...$asyncs The Async instances to await concurrently.
+     * @return array<int|string, mixed> Results in the same order/keys as input.
+     * @throws InvalidArgumentException If no Async instances are provided.
+     */
+    public static function awaitAll(Async ...$asyncs): array
+    {
+        if (empty($asyncs)) {
+            throw new InvalidArgumentException(
+                "Async::awaitAll() requires at least one Async instance.",
+            );
+        }
+
+        // Start all fibers that haven't been started yet
+        foreach ($asyncs as $async) {
+            if ($async->fiber !== null && !$async->fiber->isStarted()) {
+                $async->fiber->start();
+            }
+        }
+
+        if (Fiber::getCurrent() !== null) {
+            return self::awaitAllInsideFiber($asyncs);
+        }
+
+        return self::awaitAllOutsideFiber($asyncs);
+    }
+
+    /**
+     * Concurrent await of multiple Asyncs when called from inside a Fiber.
+     *
+     * On each tick, resumes every non-terminated fiber, then yields
+     * control back to the scheduler via Pause::force() so that other
+     * fibers (Launch jobs, etc.) can also make progress.
+     *
+     * @param array<int|string, Async> $asyncs
+     * @return array<int|string, mixed>
+     */
+    private static function awaitAllInsideFiber(array $asyncs): array
+    {
+        $results = [];
+        $pending = $asyncs; // copy — we'll remove completed entries
+
+        while (!empty($pending)) {
+            foreach ($pending as $key => $async) {
+                $fiber = $async->fiber;
+
+                if ($fiber === null || $fiber->isTerminated()) {
+                    // Collect the result
+                    $results[$key] =
+                        $fiber !== null ? $fiber->getReturn() : null;
+                    // Release fiber reference early
+                    $async->fiber = null;
+                    unset($pending[$key]);
+                    continue;
+                }
+
+                if ($fiber->isSuspended()) {
+                    $fiber->resume();
+                }
+            }
+
+            if (!empty($pending)) {
+                Pause::force();
+            }
+        }
+
+        // Return results in the original key order
+        ksort($results);
+        return $results;
+    }
+
+    /**
+     * Concurrent await of multiple Asyncs when called from outside a Fiber.
+     *
+     * Manually drives the scheduler (AsyncIO, WorkerPool, Launch) on
+     * each tick, then resumes all non-terminated fibers. A small usleep
+     * is added on idle ticks to avoid 100% CPU spin.
+     *
+     * @param array<int|string, Async> $asyncs
+     * @return array<int|string, mixed>
+     */
+    private static function awaitAllOutsideFiber(array $asyncs): array
+    {
+        $results = [];
+        $pending = $asyncs;
+
+        while (!empty($pending)) {
+            $didWork = false;
+
+            // Drive subsystems
+            if (AsyncIO::hasPending()) {
+                if (AsyncIO::pollOnce()) {
+                    $didWork = true;
+                }
+            }
+
+            if (!WorkerPool::isEmpty()) {
+                WorkerPool::run();
+                $didWork = true;
+            }
+
+            if (Launch::getInstance()->hasActiveTasks()) {
+                Launch::getInstance()->runOnce();
+                $didWork = true;
+            }
+
+            // Resume all pending fibers
+            foreach ($pending as $key => $async) {
+                $fiber = $async->fiber;
+
+                if ($fiber === null || $fiber->isTerminated()) {
+                    $results[$key] =
+                        $fiber !== null ? $fiber->getReturn() : null;
+                    $async->fiber = null;
+                    unset($pending[$key]);
+                    $didWork = true;
+                    continue;
+                }
+
+                if ($fiber->isSuspended()) {
+                    $fiber->resume();
+                    $didWork = true;
+                }
+            }
+
+            if (!empty($pending) && !$didWork) {
+                usleep(500);
+            }
+        }
+
+        ksort($results);
+        return $results;
     }
 
     /**

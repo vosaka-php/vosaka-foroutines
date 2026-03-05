@@ -46,27 +46,37 @@ error_reporting(E_ALL);
 
 // ── Bootstrap: find and load Composer autoloader ──────────────────────
 
-$possiblePaths = [
-    __DIR__ . "/../vendor/autoload.php",
-    __DIR__ . "/../../vendor/autoload.php",
-    __DIR__ . "/../../../vendor/autoload.php",
-    __DIR__ . "/../../../../vendor/autoload.php",
-    __DIR__ . "/../../../../../vendor/autoload.php",
-];
+function findAutoload(string $startDir, int $maxDepth = 10): string
+{
+    $dir = $startDir;
 
-$autoloadFound = false;
-foreach ($possiblePaths as $path) {
-    if (file_exists($path)) {
-        require_once $path;
-        $autoloadFound = true;
-        break;
+    for ($i = 0; $i < $maxDepth; $i++) {
+        if (
+            file_exists($dir . "/composer.json") &&
+            file_exists($dir . "/vendor/autoload.php")
+        ) {
+            return $dir . "/vendor/autoload.php";
+        }
+
+        if (file_exists($dir . "/vendor/autoload.php")) {
+            return $dir . "/vendor/autoload.php";
+        }
+
+        $parent = dirname($dir);
+        if ($parent === $dir) {
+            break;
+        }
+        $dir = $parent;
     }
-}
 
-if (!$autoloadFound) {
-    fwrite(STDERR, "worker_socket_loop: Could not find vendor/autoload.php\n");
+    fwrite(
+        STDERR,
+        "worker_socket_loop: Could not find vendor/autoload.php (searched from: $startDir)\n",
+    );
     exit(1);
 }
+
+require_once findAutoload(__DIR__);
 
 use Laravel\SerializableClosure\SerializableClosure;
 
@@ -268,6 +278,118 @@ function worker_execute_task($conn, string $base64Payload): void
     worker_send($conn, "READY");
 }
 
+/**
+ * Execute a batch of task closures and send all results back to the parent.
+ *
+ * Protocol:
+ *   Input:  BATCH:<base64(json([{"payload":"<base64closure>","id":<int>}, ...]))>
+ *   Output: BATCH_RESULTS:<base64(json([{"id":<int>,"type":"result"|"error","payload":"<base64>"}, ...]))>
+ *           READY
+ *
+ * @param resource $conn           The TCP connection stream.
+ * @param string   $base64Payload  Base64-encoded JSON array of task entries.
+ */
+function worker_execute_batch($conn, string $base64Payload): void
+{
+    $results = [];
+
+    try {
+        $decoded = base64_decode($base64Payload, true);
+        if ($decoded === false) {
+            throw new RuntimeException("Failed to base64_decode batch payload");
+        }
+
+        $tasks = json_decode($decoded, true);
+        if (!is_array($tasks)) {
+            throw new RuntimeException("Failed to json_decode batch payload");
+        }
+
+        foreach ($tasks as $taskEntry) {
+            $taskId = $taskEntry["id"] ?? null;
+            $taskPayload = $taskEntry["payload"] ?? null;
+
+            if ($taskId === null || $taskPayload === null) {
+                continue;
+            }
+
+            try {
+                $closureDecoded = base64_decode($taskPayload, true);
+                if ($closureDecoded === false) {
+                    throw new RuntimeException(
+                        "Failed to base64_decode task payload",
+                    );
+                }
+
+                /** @var SerializableClosure $sc */
+                $sc = unserialize($closureDecoded);
+                $closure = $sc->getClosure();
+
+                // Execute the closure
+                $result = $closure();
+
+                // If the closure returned a Generator, exhaust it
+                if ($result instanceof Generator) {
+                    $genResult = null;
+                    while ($result->valid()) {
+                        $genResult = $result->current();
+                        $result->next();
+                    }
+                    try {
+                        $returnValue = $result->getReturn();
+                        if ($returnValue !== null) {
+                            $genResult = $returnValue;
+                        }
+                    } catch (Exception) {
+                        // Generator didn't use return; use last yielded value
+                    }
+                    $result = $genResult;
+                }
+
+                $results[] = [
+                    "id" => $taskId,
+                    "type" => "result",
+                    "payload" => base64_encode(serialize($result)),
+                ];
+            } catch (Throwable $e) {
+                $errorData = [
+                    "__worker_error__" => true,
+                    "message" => $e->getMessage(),
+                    "file" => $e->getFile(),
+                    "line" => $e->getLine(),
+                    "trace" => $e->getTraceAsString(),
+                ];
+                $results[] = [
+                    "id" => $taskId,
+                    "type" => "error",
+                    "payload" => base64_encode(serialize($errorData)),
+                ];
+
+                fwrite(
+                    STDERR,
+                    "worker_socket_loop batch error: " .
+                        $e->getMessage() .
+                        "\n",
+                );
+            }
+        }
+    } catch (Throwable $e) {
+        fwrite(
+            STDERR,
+            "worker_socket_loop: batch decode failed: " .
+                $e->getMessage() .
+                "\n",
+        );
+    }
+
+    // Send all results in a single message
+    $batchJson = json_encode($results, JSON_UNESCAPED_SLASHES);
+    $batchEncoded = base64_encode($batchJson);
+    worker_send($conn, "BATCH_RESULTS:" . $batchEncoded);
+
+    // Signal readiness for next task/batch
+    worker_send($conn, "READY");
+}
+
 // ── Signal the parent that we are alive ───────────────────────────────
 
 worker_send($conn, "READY");
@@ -323,10 +445,17 @@ while (true) {
                 exit(0);
             }
 
-            // Task dispatch
+            // Task dispatch (single task)
             if (str_starts_with($line, "TASK:")) {
                 $payload = substr($line, 5); // strip "TASK:" prefix
                 worker_execute_task($conn, $payload);
+                continue;
+            }
+
+            // Batch dispatch (multiple tasks)
+            if (str_starts_with($line, "BATCH:")) {
+                $payload = substr($line, 6); // strip "BATCH:" prefix
+                worker_execute_batch($conn, $payload);
                 continue;
             }
 
