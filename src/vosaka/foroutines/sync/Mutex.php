@@ -81,9 +81,6 @@ class Mutex
                 $this->initApcuLock();
                 break;
         }
-
-        // Cleanup on script termination
-        register_shutdown_function([$this, "release"]);
     }
 
     /**
@@ -212,16 +209,11 @@ class Mutex
      */
     private function generateSemaphoreKey(string $name): int
     {
-        // Try ftok first
-        if (function_exists("ftok")) {
-            $key = ftok(__FILE__, substr(md5($name), 0, 1));
-            if ($key !== -1) {
-                return $key;
-            }
-        }
-
-        // Fallback: generate from hash
-        return abs(crc32($name)) % 0x7fffffff;
+        // Use a hash-based approach that provides full 31-bit range
+        // to avoid collisions between different mutex names.
+        // ftok() with a single hex char only gives 16 possible keys,
+        // which causes deadlocks when two mutexes map to the same key.
+        return abs(crc32("mutex_" . $name)) % 0x7fffffff ?: 1;
     }
 
     /**
@@ -509,20 +501,13 @@ class Mutex
     {
         $this->release();
 
-        // Clean up semaphore if needed
-        if (
-            $this->semaphore &&
-            $this->actualLockType === self::LOCK_SEMAPHORE
-        ) {
-            // Note: sem_remove() removes the semaphore completely
-            // Use with caution in multi-process environments.
-            // Suppress warnings in case another Mutex instance sharing
-            // the same semaphore key already removed it, or the
-            // shutdown function already ran release() which invalidated
-            // the resource.
-            @sem_remove($this->semaphore);
-            $this->semaphore = null;
-        }
+        // Do NOT call sem_remove() here. sem_remove() destroys the
+        // semaphore system-wide, which would break any other Mutex
+        // instance (in this or another process) that shares the same
+        // semaphore. The OS will clean up the resource handle when the
+        // process exits. If explicit removal is needed, the caller
+        // should manage that externally.
+        $this->semaphore = null;
     }
 
     /**

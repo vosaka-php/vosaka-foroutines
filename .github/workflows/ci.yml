@@ -25,8 +25,8 @@ jobs:
               uses: shivammathur/setup-php@v2
               with:
                   php-version: ${{ matrix.php }}
-                  extensions: shmop, fileinfo, zlib, pcntl, sysvsem, posix
-                  ini-values: max_execution_time=120
+                  extensions: shmop, fileinfo, zlib, pcntl, sysvsem, posix, sockets
+                  ini-values: max_execution_time=300
                   coverage: none
 
             - name: Setup PHP (Windows)
@@ -34,8 +34,8 @@ jobs:
               uses: shivammathur/setup-php@v2
               with:
                   php-version: ${{ matrix.php }}
-                  extensions: shmop, fileinfo, zlib
-                  ini-values: max_execution_time=120
+                  extensions: shmop, fileinfo, zlib, sockets
+                  ini-values: max_execution_time=300
                   coverage: none
 
             - name: Composer update
@@ -47,20 +47,80 @@ jobs:
             - name: Install dependencies
               run: composer install --prefer-dist --no-interaction --no-progress
 
-            - name: Run improvement test suite
-              run: php tests/test_improvements.php
+            # ==============================================================
+            #  Core / Basic tests
+            # ==============================================================
 
             - name: Run basic tests
               working-directory: tests
               run: php basic.php
 
-            - name: Run channel tests
+            - name: Run improvement test suite
+              run: php tests/test_improvements.php
+
+            # ==============================================================
+            #  Async / Await / Concurrency tests
+            # ==============================================================
+
+            - name: Run async await tests
               working-directory: tests
-              run: php test_channel.php
+              run: php test_async_await.php
+
+            - name: Run await all tests
+              working-directory: tests
+              run: php test_await_all.php
+
+            - name: Run launch delay tests
+              working-directory: tests
+              run: php test_launch_delay.php
 
             - name: Run delay tests
               working-directory: tests
               run: php test_delay.php
+
+            - name: Run repeat tests
+              working-directory: tests
+              run: php test_repeat.php
+
+            - name: Run timeout tests
+              working-directory: tests
+              run: php test_with_timeout.php
+
+            - name: Run select tests
+              working-directory: tests
+              run: php test_select.php
+
+            # ==============================================================
+            #  Channel tests
+            # ==============================================================
+
+            - name: Run channel tests
+              working-directory: tests
+              run: php test_channel.php
+
+            - name: Run channel create tests
+              working-directory: tests
+              run: php test_channel_create.php
+
+            - name: Run channels utils tests
+              working-directory: tests
+              run: php test_channels_utils.php
+
+            - name: Run channel socket tests
+              working-directory: tests
+              run: php test_channel_socket.php
+
+            - name: Run channel pool tests
+              working-directory: tests
+              run: php test_channel_pool.php
+
+            - name: Run channel IO dispatchers tests
+              working-directory: tests
+              run: php test_channel_io_dispatchers.php
+
+            # ==============================================================
+            #  Synchronization tests
+            # ==============================================================
 
             - name: Run mutex tests
               working-directory: tests
@@ -70,41 +130,9 @@ jobs:
               working-directory: tests
               run: php test_shared_state_flow.php
 
-            - name: Run job lifecycle tests
-              working-directory: tests
-              run: php test_job_lifecycle.php
-
-            - name: Run error handling tests
-              working-directory: tests
-              run: php test_error_handling.php
-
-            - name: Run async await tests
-              working-directory: tests
-              run: php test_async_await.php
-
-            - name: Run select tests
-              working-directory: tests
-              run: php test_select.php
-
-            - name: Run structured concurrency tests
-              working-directory: tests
-              run: php test_structured_concurrency.php
-
-            - name: Run timeout tests
-              working-directory: tests
-              run: php test_with_timeout.php
-
-            - name: Run event loop tests
-              working-directory: tests
-              run: php test_event_loop.php
-
-            - name: Run repeat tests
-              working-directory: tests
-              run: php test_repeat.php
-
-            - name: Run channels utils tests
-              working-directory: tests
-              run: php test_channels_utils.php
+            # ==============================================================
+            #  Dispatcher / IO / Event loop tests
+            # ==============================================================
 
             - name: Run dispatchers tests
               working-directory: tests
@@ -113,6 +141,74 @@ jobs:
             - name: Run IO tests
               working-directory: tests
               run: php test_io.php
+
+            - name: Run event loop tests
+              working-directory: tests
+              run: php test_event_loop.php
+
+            # ==============================================================
+            #  Job / Lifecycle / Error handling tests
+            # ==============================================================
+
+            - name: Run job lifecycle tests
+              working-directory: tests
+              run: php test_job_lifecycle.php
+
+            - name: Run error handling tests
+              working-directory: tests
+              run: php test_error_handling.php
+
+            - name: Run structured concurrency tests
+              working-directory: tests
+              run: php test_structured_concurrency.php
+
+            # ==============================================================
+            #  Worker pool tests
+            # ==============================================================
+
+            - name: Run worker pool tests
+              working-directory: tests
+              run: php test_worker_pool.php
+
+            - name: Run worker debug tests
+              working-directory: tests
+              run: php test_worker_debug.php
+
+            - name: Run task batching tests
+              working-directory: tests
+              run: php test_task_batching.php
+
+            - name: Run dynamic pool tests
+              working-directory: tests
+              run: php test_dynamic_pool.php
+
+            - name: Run worker processes tests
+              working-directory: tests
+              timeout-minutes: 3
+              run: php test_worker_processes.php
+
+            # ==============================================================
+            #  Platform diagnostic tests (pipe / stream behavior)
+            # ==============================================================
+
+            - name: Run stream_select pipe test
+              working-directory: tests
+              timeout-minutes: 1
+              run: php test_stream_select_pipe.php
+
+            - name: Run timeout pipe test
+              working-directory: tests
+              timeout-minutes: 1
+              run: php test_timeout_pipe.php
+
+            - name: Run fread nonblock test
+              working-directory: tests
+              timeout-minutes: 1
+              run: php test_fread_nonblock.php
+
+            # ==============================================================
+            #  Platform verification
+            # ==============================================================
 
             - name: Verify ForkProcess availability (Linux only)
               if: runner.os == 'Linux'
