@@ -40,6 +40,9 @@ require_once findAutoload(__DIR__);
 require_once __DIR__ . DIRECTORY_SEPARATOR . "script_functions.php";
 
 use Laravel\SerializableClosure\SerializableClosure;
+use vosaka\foroutines\Async;
+use vosaka\foroutines\RunBlocking;
+use vosaka\foroutines\Thread;
 
 if (!isset($argv[1])) {
     error("Shmop Key not provided");
@@ -72,7 +75,12 @@ $serializedClosure = unserialize($data);
 $closure = $serializedClosure->getClosure();
 /* ob_start(); */
 try {
-    $result = $closure();
+    $result = null;
+    RunBlocking::new(function () use (&$result, $closure) {
+        $result = Async::new($closure)->await();
+    });
+    Thread::await();
+
     if ($result instanceof Generator) {
         foreach ($result as $value) {
             // Process each yielded value if needed

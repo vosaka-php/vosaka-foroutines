@@ -210,9 +210,7 @@ final class ForkWorkerManager
      * Execute a single task in the fork-based worker child process.
      *
      * Deserializes the closure from the base64-encoded payload, executes
-     * it, and sends the result (or error) back to the parent. If the
-     * closure returns a Generator, it is exhausted and the final value
-     * is used as the result.
+     * it, and sends the result (or error) back to the parent.
      *
      * After execution, sends a READY signal to indicate availability
      * for the next task.
@@ -236,24 +234,11 @@ final class ForkWorkerManager
             $sc = unserialize($decoded);
             $closure = $sc->getClosure();
 
-            $result = $closure();
-
-            // If Generator, exhaust it
-            if ($result instanceof \Generator) {
-                $genResult = null;
-                while ($result->valid()) {
-                    $genResult = $result->current();
-                    $result->next();
-                }
-                try {
-                    $returnValue = $result->getReturn();
-                    if ($returnValue !== null) {
-                        $genResult = $returnValue;
-                    }
-                } catch (\Exception) {
-                }
-                $result = $genResult;
-            }
+            $result = null;
+            RunBlocking::new(function () use (&$result, $closure) {
+                $result = Async::new($closure)->await();
+            });
+            Thread::await();
 
             $encoded = base64_encode(serialize($result));
             WorkerPoolCommunication::socketWriteLine(
@@ -335,24 +320,11 @@ final class ForkWorkerManager
                     $sc = unserialize($closureDecoded);
                     $closure = $sc->getClosure();
 
-                    $result = $closure();
-
-                    // If Generator, exhaust it
-                    if ($result instanceof \Generator) {
-                        $genResult = null;
-                        while ($result->valid()) {
-                            $genResult = $result->current();
-                            $result->next();
-                        }
-                        try {
-                            $returnValue = $result->getReturn();
-                            if ($returnValue !== null) {
-                                $genResult = $returnValue;
-                            }
-                        } catch (\Exception) {
-                        }
-                        $result = $genResult;
-                    }
+                    $result = null;
+                    RunBlocking::new(function () use (&$result, $closure) {
+                        $result = Async::new($closure)->await();
+                    });
+                    Thread::await();
 
                     $results[] = [
                         "id" => $taskId,

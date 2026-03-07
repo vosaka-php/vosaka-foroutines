@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace vosaka\foroutines\flow;
 
-use Generator;
 use Fiber;
 use RuntimeException;
 use Throwable;
@@ -67,7 +66,7 @@ final class Flow extends BaseFlow
     private ?Fiber $fiber = null;
 
     /**
-     * The source callable/generator/async/fiber that produces values.
+     * The source callable/async/fiber that produces values.
      * Uses `mixed` because `callable` cannot appear in a union type
      * for typed properties in PHP 8.1+.
      */
@@ -80,21 +79,21 @@ final class Flow extends BaseFlow
      */
     private static ?\Closure $emptySource = null;
 
-    private function __construct(callable|Generator|Async|Fiber $source)
+    private function __construct(callable|Async|Fiber $source)
     {
         $this->source = $source;
     }
 
     /**
-     * Create a new Flow from a callable, Generator, Async, or Fiber.
+     * Create a new Flow from a callable, Async, or Fiber.
      *
-     * The callable should use Flow::emit() to produce values. Generators
-     * and Fibers are also supported as source types.
+     * The callable should use Flow::emit() to produce values.
+     * Fibers are also supported as source types.
      *
-     * @param callable|Generator|Async|Fiber $source The value source.
+     * @param callable|Async|Fiber $source The value source.
      * @return Flow
      */
-    public static function new(callable|Generator|Async|Fiber $source): Flow
+    public static function new(callable|Async|Fiber $source): Flow
     {
         return new self($source);
     }

@@ -1,6 +1,6 @@
 <?php
 
-require "../vendor/autoload.php";
+require __DIR__ . '/../vendor/autoload.php';
 
 use vosaka\foroutines\Async;
 use vosaka\foroutines\Dispatchers;
@@ -18,7 +18,7 @@ use vosaka\foroutines\AsyncMain;
 function work(string $str): Async
 {
     return Async::new(function () use ($str) {
-        yield;
+        Delay::new(0); // Yield cooperatively
         sleep(2);
         file_put_contents("test.txt", $str);
         return 10;
@@ -34,14 +34,22 @@ function main()
 
     RunBlocking::new(function () {
         Launch::new(function () {
+            sleep(2);
             Delay::new(3000);
             var_dump("Async 2 completed");
-        });
 
-        Launch::new(function (): Generator {
-            sleep(1);
+            Launch::new(fn() => file_put_contents("test1.txt", "BBB"));
+        }, Dispatchers::IO);
+
+        Launch::new(function (): void {
+            Launch::new(function () {
+                Launch::new(function () {
+                    file_put_contents("test2.txt", "BBB");
+                }, Dispatchers::IO);
+            }, Dispatchers::IO);
+            sleep(2);
             var_dump("Generator 1 completed");
-            return yield 20;
+            Delay::new(0); // Yield cooperatively
         }, Dispatchers::IO);
 
         Repeat::new(5, function () {

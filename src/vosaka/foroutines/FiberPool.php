@@ -290,7 +290,5 @@ final class FiberPool
     }
 
     /** Prevent cloning */
-    private function __clone()
-    {
-    }
+    private function __clone() {}
 }

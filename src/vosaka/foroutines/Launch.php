@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace vosaka\foroutines;
 
 use Fiber;
-use Generator;
 use Throwable;
 use SplQueue;
 
@@ -24,7 +23,7 @@ use SplQueue;
  *   allocation pressure for workloads that create many short-lived tasks
  *   (e.g. 500 trivial fibers). Pool size is capped to avoid unbounded memory.
  * - Fast-path fiber creation: for simple Closure callables, skips the full
- *   FiberUtils::makeFiber() pipeline (reflection checks, Generator detection)
+ *   FiberUtils::makeFiber() pipeline (reflection checks)
  *   and creates the Fiber directly.
  */
 final class Launch extends Job
@@ -113,12 +112,12 @@ final class Launch extends Job
     /**
      * Creates a new asynchronous task. It runs concurrently with the main thread.
      *
-     * @param callable|Generator|Async|Fiber $callable The function or generator to run asynchronously.
+     * @param callable|Async|Fiber $callable The function to run asynchronously.
      * @param Dispatchers $dispatcher The dispatcher to use for the async task.
      * @return Launch
      */
     public static function new(
-        callable|Generator|Async|Fiber $callable,
+        callable|Async|Fiber $callable,
         Dispatchers $dispatcher = Dispatchers::DEFAULT ,
     ): Launch {
         if ($dispatcher === Dispatchers::IO) {
@@ -139,11 +138,11 @@ final class Launch extends Job
     }
 
     private static function makeLaunch(
-        callable|Generator|Async|Fiber $callable,
+        callable|Async|Fiber $callable,
     ): Launch {
         // Fast-path: for plain Closure/callable, create Fiber directly
         // without going through FiberUtils::makeFiber() which performs
-        // reflection-based Generator detection. This saves ~2-5µs per
+        // reflection-based checks. This saves ~2-5µs per
         // task for simple callables (the common case).
         //
         // FiberPool::global() is used to track creation statistics for

@@ -68,6 +68,9 @@ function findAutoload(string $startDir, int $maxDepth = 10): string
 require_once findAutoload(__DIR__);
 
 use Laravel\SerializableClosure\SerializableClosure;
+use vosaka\foroutines\Async;
+use vosaka\foroutines\RunBlocking;
+use vosaka\foroutines\Thread;
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -139,25 +142,11 @@ function worker_execute_batch(string $base64Payload): void
                 $closure = $sc->getClosure();
 
                 // Execute the closure
-                $result = $closure();
-
-                // If the closure returned a Generator, exhaust it
-                if ($result instanceof Generator) {
-                    $genResult = null;
-                    while ($result->valid()) {
-                        $genResult = $result->current();
-                        $result->next();
-                    }
-                    try {
-                        $returnValue = $result->getReturn();
-                        if ($returnValue !== null) {
-                            $genResult = $returnValue;
-                        }
-                    } catch (Exception) {
-                        // Generator didn't use return; use last yielded value
-                    }
-                    $result = $genResult;
-                }
+                $result = null;
+                RunBlocking::new(function () use (&$result, $closure) {
+                    $result = Async::new($closure)->await();
+                });
+                Thread::await();
 
                 $results[] = [
                     "id" => $taskId,
@@ -241,25 +230,11 @@ while (true) {
             $closure = $sc->getClosure();
 
             // Execute the closure
-            $result = $closure();
-
-            // If the closure returned a Generator, exhaust it
-            if ($result instanceof Generator) {
-                $genResult = null;
-                while ($result->valid()) {
-                    $genResult = $result->current();
-                    $result->next();
-                }
-                try {
-                    $returnValue = $result->getReturn();
-                    if ($returnValue !== null) {
-                        $genResult = $returnValue;
-                    }
-                } catch (Exception) {
-                    // Generator didn't use return; use last yielded value
-                }
-                $result = $genResult;
-            }
+            $result = null;
+            RunBlocking::new(function () use (&$result, $closure) {
+                $result = Async::new($closure)->await();
+            });
+            Thread::await();
 
             $serializedResult = serialize($result);
             $encodedResult = base64_encode($serializedResult);

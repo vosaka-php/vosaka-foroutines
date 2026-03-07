@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace vosaka\foroutines;
 
 use Fiber;
-use Generator;
 use InvalidArgumentException;
 
 /**
  * Class Async
  *
  * Represents an asynchronous task that can be executed in a separate Foroutine.
- * This class allows you to run a function or generator asynchronously and wait for its result.
+ * This class allows you to run a function asynchronously and wait for its result.
  */
 final class Async
 {
@@ -23,12 +22,12 @@ final class Async
     /**
      * Creates a new asynchronous task.
      *
-     * @param callable|Generator $callable The function or generator to run asynchronously.
+     * @param callable $callable The function to run asynchronously.
      * @param Dispatchers $dispatcher The dispatcher to use for the async task.
      * @return Async
      */
     public static function new(
-        callable|Generator $callable,
+        callable $callable,
         Dispatchers $dispatcher = Dispatchers::DEFAULT ,
     ): Async {
         if ($dispatcher === Dispatchers::IO) {

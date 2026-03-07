@@ -6,7 +6,6 @@ namespace vosaka\foroutines;
 
 use Closure;
 use Exception;
-use Generator;
 
 /**
  * ForkProcess — Low-overhead child process execution via pcntl_fork().
@@ -170,7 +169,7 @@ final class ForkProcess
         //   - Child writes: READY_MARKER + base64(serialize($result))
         //   - Parent polls for READY_MARKER prefix
         $shmopKey = $this->shmopKey;
-        $markerLen = strlen(self::READY_MARKER);
+        /* $markerLen = strlen(self::READY_MARKER); */
 
         $shm = @shmop_open($shmopKey, "c", 0660, self::MAX_SHMOP_SIZE);
         if ($shm === false) {
@@ -249,28 +248,11 @@ final class ForkProcess
             Launch::resetPool();
 
             // Execute the user's closure
-            $result = $closure();
-
-            // If the closure returned a Generator, exhaust it to get
-            // the final value. Generators cannot be serialized, so we
-            // must consume them here in the child process.
-            if ($result instanceof Generator) {
-                $genResult = null;
-                while ($result->valid()) {
-                    $genResult = $result->current();
-                    $result->next();
-                }
-                // If the generator used "return <value>", prefer that.
-                try {
-                    $returnValue = $result->getReturn();
-                    if ($returnValue !== null) {
-                        $genResult = $returnValue;
-                    }
-                } catch (\Exception) {
-                    // Generator didn't return a value; use last yielded value
-                }
-                $result = $genResult;
-            }
+            $result = null;
+            RunBlocking::new(function () use (&$result, $closure) {
+                $result = Async::new($closure)->await();
+            });
+            Thread::await();
 
             // Serialize the result
             $serialized = serialize($result);
