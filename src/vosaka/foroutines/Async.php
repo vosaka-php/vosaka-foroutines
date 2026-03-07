@@ -31,7 +31,11 @@ final class Async
         Dispatchers $dispatcher = Dispatchers::DEFAULT ,
     ): Async {
         if ($dispatcher === Dispatchers::IO) {
-            return WorkerPool::addAsync($callable);
+            if (WorkerPoolState::$isWorker) {
+                $dispatcher = Dispatchers::DEFAULT;
+            } else {
+                return WorkerPool::addAsync($callable);
+            }
         }
 
         if ($dispatcher === Dispatchers::MAIN) {

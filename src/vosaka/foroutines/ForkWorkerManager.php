@@ -82,6 +82,8 @@ final class ForkWorkerManager
             AsyncIO::resetState();
             EventLoop::resetState();
 
+            WorkerPoolState::$isWorker = true;
+
             self::forkWorkerLoop($childSocket);
             // Never returns
         }

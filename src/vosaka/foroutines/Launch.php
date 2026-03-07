@@ -121,11 +121,15 @@ final class Launch extends Job
         Dispatchers $dispatcher = Dispatchers::DEFAULT ,
     ): Launch {
         if ($dispatcher === Dispatchers::IO) {
-            // Arrow function: lighter than function() use() — no explicit
-            // use-binding array, fewer opcodes, single-expression body.
-            return self::makeLaunch(
-                fn() => WorkerPool::addAsync($callable)->await(),
-            );
+            if (WorkerPoolState::$isWorker) {
+                $dispatcher = Dispatchers::DEFAULT;
+            } else {
+                // Arrow function: lighter than function() use() — no explicit
+                // use-binding array, fewer opcodes, single-expression body.
+                return self::makeLaunch(
+                    fn() => WorkerPool::addAsync($callable)->await(),
+                );
+            }
         }
 
         if ($dispatcher === Dispatchers::MAIN) {

@@ -45,6 +45,9 @@ function main()
             Launch::new(function () {
                 Launch::new(function () {
                     file_put_contents("test2.txt", "BBB");
+                    Launch::new(function () {
+                        file_put_contents("test2.txt", "BBB");
+                    }, Dispatchers::IO);
                 }, Dispatchers::IO);
             }, Dispatchers::IO);
             sleep(2);

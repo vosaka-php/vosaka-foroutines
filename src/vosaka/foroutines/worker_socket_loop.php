@@ -78,6 +78,8 @@ function findAutoload(string $startDir, int $maxDepth = 10): string
 
 require_once findAutoload(__DIR__);
 
+\vosaka\foroutines\WorkerPoolState::$isWorker = true;
+
 use Laravel\SerializableClosure\SerializableClosure;
 use vosaka\foroutines\Async;
 use vosaka\foroutines\RunBlocking;

@@ -28,6 +28,9 @@ final class WorkerPoolState
     /** Whether the pool has been booted (workers spawned) */
     public static bool $booted = false;
 
+    /** Whether the current process is a worker process */
+    public static bool $isWorker = false;
+
     /**
      * Worker slots.
      *
@@ -283,6 +286,7 @@ final class WorkerPoolState
         self::$returns = [];
         self::$readBuffers = [];
         self::$booted = false;
+        self::$isWorker = false;
         self::$nextTaskId = 1;
         self::$serverSocket = null;
         self::$serverPort = 0;
