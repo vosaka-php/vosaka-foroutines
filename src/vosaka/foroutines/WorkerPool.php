@@ -200,6 +200,11 @@ final class WorkerPool
             }
             $result = WorkerPoolState::$returns[$id];
             unset(WorkerPoolState::$returns[$id]);
+
+            if ($result instanceof \Throwable) {
+                throw $result;
+            }
+
             return $result;
         });
     }

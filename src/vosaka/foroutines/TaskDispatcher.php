@@ -103,7 +103,7 @@ final class TaskDispatcher
             $encoded = self::serializeClosure($closure, $i);
             if ($encoded === null) {
                 WorkerPoolState::$returns[$taskId] =
-                    "Error: Failed to serialize closure";
+                    new \RuntimeException("Worker task failed to serialize closure");
                 continue;
             }
 
@@ -180,7 +180,7 @@ final class TaskDispatcher
                 if ($encoded === null) {
                     // Serialization failed — resolve immediately
                     WorkerPoolState::$returns[$taskId] =
-                        "Error: Failed to serialize closure";
+                        new \RuntimeException("Worker batch task failed to serialize closure");
                     continue;
                 }
 
@@ -349,8 +349,7 @@ final class TaskDispatcher
                             );
                         } catch (\Throwable $e) {
                             WorkerPoolState::$returns[$taskId] =
-                                "Error: Failed to decode result: " .
-                                $e->getMessage();
+                                new \RuntimeException("Failed to decode worker result: " . $e->getMessage(), 0, $e);
                         }
                     }
                     continue;
@@ -372,10 +371,10 @@ final class TaskDispatcher
                                 "Unknown worker error"
                                 : "Unknown worker error";
                             WorkerPoolState::$returns[$taskId] =
-                                "Error: " . $message;
+                                new \RuntimeException("Worker exception: " . $message);
                         } catch (\Throwable) {
                             WorkerPoolState::$returns[$taskId] =
-                                "Error: Worker error (decode failed)";
+                                new \RuntimeException("Worker exception (decode failed)");
                         }
                     }
                     continue;
@@ -404,7 +403,7 @@ final class TaskDispatcher
                     : [$taskIdOrIds];
                 foreach ($taskIds as $tid) {
                     WorkerPoolState::$returns[$tid] =
-                        "Error: Worker process died unexpectedly";
+                        new \RuntimeException("Worker process died unexpectedly");
                 }
 
                 WorkerPoolState::$workers[$i]["busy"] = false;
@@ -488,8 +487,7 @@ final class TaskDispatcher
                         );
                     } catch (\Throwable $e) {
                         WorkerPoolState::$returns[$taskId] =
-                            "Error: Failed to decode batch result: " .
-                            $e->getMessage();
+                            new \RuntimeException("Failed to decode worker batch result: " . $e->getMessage(), 0, $e);
                     }
                 } elseif ($type === "error") {
                     try {
@@ -502,10 +500,10 @@ final class TaskDispatcher
                             ? $errorData["message"] ?? "Unknown worker error"
                             : "Unknown worker error";
                         WorkerPoolState::$returns[$taskId] =
-                            "Error: " . $message;
+                            new \RuntimeException("Worker exception: " . $message);
                     } catch (\Throwable) {
                         WorkerPoolState::$returns[$taskId] =
-                            "Error: Worker batch error (decode failed)";
+                            new \RuntimeException("Worker exception (batch decode failed)");
                     }
                 }
             }
@@ -517,8 +515,7 @@ final class TaskDispatcher
             foreach ($taskIds as $tid) {
                 if (!array_key_exists($tid, WorkerPoolState::$returns)) {
                     WorkerPoolState::$returns[$tid] =
-                        "Error: Failed to decode batch results: " .
-                        $e->getMessage();
+                        new \RuntimeException("Failed to decode worker batch results: " . $e->getMessage(), 0, $e);
                 }
             }
         }

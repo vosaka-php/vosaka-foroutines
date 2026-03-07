@@ -18,7 +18,6 @@ use vosaka\foroutines\AsyncMain;
 function work(string $str): Async
 {
     return Async::new(function () use ($str) {
-        Delay::new(0); // Yield cooperatively
         sleep(2);
         file_put_contents("test.txt", $str);
         return 10;
@@ -33,13 +32,16 @@ function main()
     $time = microtime(true);
 
     RunBlocking::new(function () {
-        Launch::new(function () {
+        $failingTask = Async::new(function () {
             sleep(2);
-            Delay::new(3000);
             var_dump("Async 2 completed");
-
-            Launch::new(fn() => file_put_contents("test1.txt", "BBB"));
         }, Dispatchers::IO);
+
+        try {
+            $failingTask->await();
+        } catch (\Throwable $e) {
+            var_dump("Caught worker exception: " . $e->getMessage());
+        }
 
         Launch::new(function (): void {
             Launch::new(function () {
@@ -52,7 +54,6 @@ function main()
             }, Dispatchers::IO);
             sleep(2);
             var_dump("Generator 1 completed");
-            Delay::new(0); // Yield cooperatively
         }, Dispatchers::IO);
 
         Repeat::new(5, function () {
@@ -71,7 +72,7 @@ function main()
         file_put_contents("tests.txt", "Hello, World! from main");
 
         Thread::await();
-    }, Dispatchers::IO);
+    });
 
     Thread::await();
 
