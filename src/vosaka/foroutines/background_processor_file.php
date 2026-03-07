@@ -5,44 +5,10 @@ ini_set("display_startup_errors", 1);
 ini_set("error_log", "foroutines-errors-" . date("YmdH") . ".log");
 error_reporting(E_ALL);
 
-function findAutoload(string $startDir, int $maxDepth = 10): string
-{
-    $dir = $startDir;
-
-    for ($i = 0; $i < $maxDepth; $i++) {
-        if (
-            file_exists($dir . "/composer.json") &&
-            file_exists($dir . "/vendor/autoload.php")
-        ) {
-            return $dir . "/vendor/autoload.php";
-        }
-
-        if (file_exists($dir . "/vendor/autoload.php")) {
-            return $dir . "/vendor/autoload.php";
-        }
-
-        $parent = dirname($dir);
-        if ($parent === $dir) {
-            break;
-        }
-        $dir = $parent;
-    }
-
-    fwrite(
-        STDERR,
-        "background_processor_file: Could not find vendor/autoload.php (searched from: $startDir)\n",
-    );
-    exit(1);
-}
-
+require_once __DIR__ . DIRECTORY_SEPARATOR . "script_functions.php";
 require_once findAutoload(__DIR__);
 
-require_once __DIR__ . DIRECTORY_SEPARATOR . "script_functions.php";
-
 use Laravel\SerializableClosure\SerializableClosure;
-use vosaka\foroutines\Async;
-use vosaka\foroutines\RunBlocking;
-use vosaka\foroutines\Thread;
 
 if (!isset($argv[1])) {
     error("Shmop Key not provided");
@@ -75,18 +41,7 @@ $serializedClosure = unserialize($data);
 $closure = $serializedClosure->getClosure();
 /* ob_start(); */
 try {
-    $result = null;
-    RunBlocking::new(function () use (&$result, $closure) {
-        $result = Async::new($closure)->await();
-    });
-    Thread::await();
-
-    if ($result instanceof Generator) {
-        foreach ($result as $value) {
-            // Process each yielded value if needed
-        }
-        $result = $result->getReturn();
-    }
+    $result = \vosaka\foroutines\CallableUtils::executeTask($closure);
 } catch (Throwable $e) {
     $result = [
         "error" => $e->getMessage(),

@@ -46,44 +46,12 @@ error_reporting(E_ALL);
 
 // ── Bootstrap: find and load Composer autoloader ──────────────────────
 
-function findAutoload(string $startDir, int $maxDepth = 10): string
-{
-    $dir = $startDir;
-
-    for ($i = 0; $i < $maxDepth; $i++) {
-        if (
-            file_exists($dir . "/composer.json") &&
-            file_exists($dir . "/vendor/autoload.php")
-        ) {
-            return $dir . "/vendor/autoload.php";
-        }
-
-        if (file_exists($dir . "/vendor/autoload.php")) {
-            return $dir . "/vendor/autoload.php";
-        }
-
-        $parent = dirname($dir);
-        if ($parent === $dir) {
-            break;
-        }
-        $dir = $parent;
-    }
-
-    fwrite(
-        STDERR,
-        "worker_socket_loop: Could not find vendor/autoload.php (searched from: $startDir)\n",
-    );
-    exit(1);
-}
-
+require_once __DIR__ . '/script_functions.php';
 require_once findAutoload(__DIR__);
 
 \vosaka\foroutines\WorkerPoolState::$isWorker = true;
 
 use Laravel\SerializableClosure\SerializableClosure;
-use vosaka\foroutines\Async;
-use vosaka\foroutines\RunBlocking;
-use vosaka\foroutines\Thread;
 
 // ── Validate arguments ────────────────────────────────────────────────
 
@@ -240,24 +208,14 @@ function worker_execute_task($conn, string $base64Payload): void
         $closure = $sc->getClosure();
 
         // Execute the closure
-        $result = null;
-        RunBlocking::new(function () use (&$result, $closure) {
-            $result = Async::new($closure)->await();
-        });
-        Thread::await();
+        $result = \vosaka\foroutines\CallableUtils::executeTask($closure);
 
         $serializedResult = serialize($result);
         $encodedResult = base64_encode($serializedResult);
 
         worker_send($conn, "RESULT:" . $encodedResult);
     } catch (Throwable $e) {
-        $errorData = [
-            "__worker_error__" => true,
-            "message" => $e->getMessage(),
-            "file" => $e->getFile(),
-            "line" => $e->getLine(),
-            "trace" => $e->getTraceAsString(),
-        ];
+        $errorData = \vosaka\foroutines\CallableUtils::buildWorkerError($e);
 
         $encodedError = base64_encode(serialize($errorData));
         worker_send($conn, "ERROR:" . $encodedError);
@@ -316,27 +274,15 @@ function worker_execute_batch($conn, string $base64Payload): void
                 $closure = $sc->getClosure();
 
                 // Execute the closure
-                $result = null;
-                RunBlocking::new(function () use (&$result, $closure) {
-                    $result = Async::new($closure)->await();
-                });
-                Thread::await();
+                $result = \vosaka\foroutines\CallableUtils::executeTask($closure);
 
                 $results[] = [
                     "id" => $taskId,
                     "type" => "result",
                     "payload" => base64_encode(serialize($result)),
                 ];
-
-                Thread::await();
             } catch (Throwable $e) {
-                $errorData = [
-                    "__worker_error__" => true,
-                    "message" => $e->getMessage(),
-                    "file" => $e->getFile(),
-                    "line" => $e->getLine(),
-                    "trace" => $e->getTraceAsString(),
-                ];
+                $errorData = \vosaka\foroutines\CallableUtils::buildWorkerError($e);
                 $results[] = [
                     "id" => $taskId,
                     "type" => "error",

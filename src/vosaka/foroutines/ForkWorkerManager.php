@@ -236,11 +236,7 @@ final class ForkWorkerManager
             $sc = unserialize($decoded);
             $closure = $sc->getClosure();
 
-            $result = null;
-            RunBlocking::new(function () use (&$result, $closure) {
-                $result = Async::new($closure)->await();
-            });
-            Thread::await();
+            $result = \vosaka\foroutines\CallableUtils::executeTask($closure);
 
             $encoded = base64_encode(serialize($result));
             WorkerPoolCommunication::socketWriteLine(
@@ -248,13 +244,7 @@ final class ForkWorkerManager
                 "RESULT:" . $encoded,
             );
         } catch (\Throwable $e) {
-            $errorData = [
-                "__worker_error__" => true,
-                "message" => $e->getMessage(),
-                "file" => $e->getFile(),
-                "line" => $e->getLine(),
-                "trace" => $e->getTraceAsString(),
-            ];
+            $errorData = \vosaka\foroutines\CallableUtils::buildWorkerError($e);
             $encoded = base64_encode(serialize($errorData));
             WorkerPoolCommunication::socketWriteLine(
                 $socket,
@@ -322,11 +312,7 @@ final class ForkWorkerManager
                     $sc = unserialize($closureDecoded);
                     $closure = $sc->getClosure();
 
-                    $result = null;
-                    RunBlocking::new(function () use (&$result, $closure) {
-                        $result = Async::new($closure)->await();
-                    });
-                    Thread::await();
+                    $result = \vosaka\foroutines\CallableUtils::executeTask($closure);
 
                     $results[] = [
                         "id" => $taskId,
@@ -334,13 +320,7 @@ final class ForkWorkerManager
                         "payload" => base64_encode(serialize($result)),
                     ];
                 } catch (\Throwable $e) {
-                    $errorData = [
-                        "__worker_error__" => true,
-                        "message" => $e->getMessage(),
-                        "file" => $e->getFile(),
-                        "line" => $e->getLine(),
-                        "trace" => $e->getTraceAsString(),
-                    ];
+                    $errorData = \vosaka\foroutines\CallableUtils::buildWorkerError($e);
                     $results[] = [
                         "id" => $taskId,
                         "type" => "error",

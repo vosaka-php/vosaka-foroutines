@@ -54,36 +54,7 @@ error_reporting(E_ALL);
 
 // ── Bootstrap: find and load Composer autoloader ──────────────────────
 
-function findAutoload(string $startDir, int $maxDepth = 10): string
-{
-    $dir = $startDir;
-
-    for ($i = 0; $i < $maxDepth; $i++) {
-        if (
-            file_exists($dir . "/composer.json") &&
-            file_exists($dir . "/vendor/autoload.php")
-        ) {
-            return $dir . "/vendor/autoload.php";
-        }
-
-        if (file_exists($dir . "/vendor/autoload.php")) {
-            return $dir . "/vendor/autoload.php";
-        }
-
-        $parent = dirname($dir);
-        if ($parent === $dir) {
-            break;
-        }
-        $dir = $parent;
-    }
-
-    fwrite(
-        STDERR,
-        "channel_broker_process: Could not find vendor/autoload.php\n",
-    );
-    exit(1);
-}
-
+require_once __DIR__ . '/../script_functions.php';
 require_once findAutoload(__DIR__);
 
 use vosaka\foroutines\channel\ChannelBroker;

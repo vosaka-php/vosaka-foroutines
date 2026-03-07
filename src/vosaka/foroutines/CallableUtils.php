@@ -6,7 +6,6 @@ namespace vosaka\foroutines;
 
 use Closure;
 use Fiber;
-use Generator;
 use Laravel\SerializableClosure\SerializableClosure;
 
 final class CallableUtils
@@ -24,7 +23,7 @@ final class CallableUtils
     private static bool $shutdownRegistered = false;
 
     public static function makeCallable(
-        callable|Generator|Async|Fiber $callable,
+        callable|Async|Fiber $callable,
     ): callable {
         if ($callable instanceof Fiber) {
             return self::fiberToCallable($callable);
@@ -32,10 +31,6 @@ final class CallableUtils
 
         if ($callable instanceof Async) {
             return self::fiberToCallable($callable->fiber);
-        }
-
-        if ($callable instanceof Generator) {
-            return self::generatorToCallable($callable);
         }
 
         return $callable;
@@ -48,28 +43,7 @@ final class CallableUtils
                 $fiber->start();
             }
 
-            while ($fiber->isStarted() && !$fiber->isTerminated()) {
-                $fiber->resume();
-            }
-
             return $fiber->getReturn();
-        };
-    }
-
-    public static function generatorToCallable(Generator $generator): callable
-    {
-        return function () use ($generator) {
-            if (!$generator->valid()) {
-                return null;
-            }
-
-            $result = null;
-            while ($generator->valid()) {
-                $result = $generator->current();
-                $generator->next();
-            }
-
-            return $result;
         };
     }
 
@@ -714,5 +688,37 @@ final class CallableUtils
             // 2c. Execute.
             return call_user_func($sc->getClosure());
         };
+    }
+
+    /**
+     * Executes a background task within a RunBlocking context, avoiding creating
+     * a redundant redundant Async fiber for the closure.
+     * @param Closure $closure The task to execute.
+     * @return mixed The result of the task.
+     */
+    public static function executeTask(Closure $closure): mixed
+    {
+        $result = null;
+        RunBlocking::new(function () use (&$result, $closure) {
+            $result = $closure();
+        });
+        Thread::await();
+        return $result;
+    }
+
+    /**
+     * Builds a standard error array for worker processes to return to the parent.
+     * @param \Throwable $e The caught exception.
+     * @return array
+     */
+    public static function buildWorkerError(\Throwable $e): array
+    {
+        return [
+            "__worker_error__" => true,
+            "message" => $e->getMessage(),
+            "file" => $e->getFile(),
+            "line" => $e->getLine(),
+            "trace" => $e->getTraceAsString(),
+        ];
     }
 }

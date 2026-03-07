@@ -169,7 +169,6 @@ final class ForkProcess
         //   - Child writes: READY_MARKER + base64(serialize($result))
         //   - Parent polls for READY_MARKER prefix
         $shmopKey = $this->shmopKey;
-        /* $markerLen = strlen(self::READY_MARKER); */
 
         $shm = @shmop_open($shmopKey, "c", 0660, self::MAX_SHMOP_SIZE);
         if ($shm === false) {
@@ -248,11 +247,7 @@ final class ForkProcess
             Launch::resetPool();
 
             // Execute the user's closure
-            $result = null;
-            RunBlocking::new(function () use (&$result, $closure) {
-                $result = Async::new($closure)->await();
-            });
-            Thread::await();
+            $result = \vosaka\foroutines\CallableUtils::executeTask($closure);
 
             // Serialize the result
             $serialized = serialize($result);
