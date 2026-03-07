@@ -20,7 +20,7 @@
  *   - Larger batch sizes should show more improvement (up to a point)
  */
 
-require "../vendor/autoload.php";
+require __DIR__ . "/../vendor/autoload.php";
 
 use vosaka\foroutines\Async;
 use vosaka\foroutines\Dispatchers;
@@ -186,7 +186,17 @@ main(function () {
             return 42;
         }, Dispatchers::IO);
 
-        $errorResults = Async::awaitAll($asyncOk, $asyncFail, $asyncOk2);
+        try {
+            $errorResults[0] = $asyncOk->await();
+        } catch (\Throwable $e) {}
+        try {
+            $errorResults[1] = $asyncFail->await();
+        } catch (\Throwable $e) {
+            $errorResults[1] = "Error: " . $e->getMessage();
+        }
+        try {
+            $errorResults[2] = $asyncOk2->await();
+        } catch (\Throwable $e) {}
 
         Thread::await();
     });

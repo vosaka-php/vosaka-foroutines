@@ -75,7 +75,7 @@
  *   "All Channel IO Dispatcher tests passed!"
  */
 
-require "../vendor/autoload.php";
+require __DIR__ . "/../vendor/autoload.php";
 
 use vosaka\foroutines\Async;
 use vosaka\foroutines\Dispatchers;

@@ -85,20 +85,28 @@ final class ChannelFileTransport
             md5($this->channelName) .
             ".dat";
 
+        // If this is the owner, initialize the file immediately with a stub state
+        // This ensures file_exists() checks (e.g. in connectByName) pass and ftok() works,
+        // even if we later bypass the file when using sysv shared memory.
+        if ($this->isOwner && $this->channelFile) {
+            $stub = [
+                "name" => $this->channelName,
+                "capacity" => $this->capacity,
+                "buffer" => [],
+                "closed" => false,
+                "created_by" => getmypid(),
+                "serializer" => $this->serializer->getSerializer(),
+            ];
+            file_put_contents($this->channelFile, $this->serializer->serializeData($stub));
+        }
+
         // Try to use System V shared memory if available
         if ($this->isSharedMemoryAvailable()) {
             $this->sharedMemoryKey = $this->generateSharedMemoryKey();
             $this->initSharedMemory();
         }
 
-        // If this is the owner and the backing file does not yet exist,
-        // persist the initial (empty) state so that connectors can find
-        // the file immediately.
-        if (
-            $this->isOwner &&
-            $this->channelFile &&
-            !file_exists($this->channelFile)
-        ) {
+        if ($this->isOwner && $this->channelFile) {
             $this->saveChannelState();
         }
         $this->loadChannelState();
@@ -216,7 +224,7 @@ final class ChannelFileTransport
             // Fallback to file
             if ($this->channelFile && file_exists($this->channelFile)) {
                 $data = file_get_contents($this->channelFile);
-                if ($data !== false) {
+                if ($data !== false && $data !== '') {
                     return $this->serializer->unserializeData($data);
                 }
             }
