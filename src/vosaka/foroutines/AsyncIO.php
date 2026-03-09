@@ -262,7 +262,13 @@ final class AsyncIO
         ];
 
         // Suspend — the scheduler's pollOnce() will resume us
-        return (bool) Fiber::suspend();
+        $result = Fiber::suspend();
+
+        if (isset(self::$readWatchers[$id])) {
+            unset(self::$readWatchers[$id]);
+        }
+
+        return (bool) $result;
     }
 
     /**
@@ -288,7 +294,13 @@ final class AsyncIO
             "fiber" => $fiber,
         ];
 
-        return (bool) Fiber::suspend();
+        $result = Fiber::suspend();
+
+        if (isset(self::$writeWatchers[$id])) {
+            unset(self::$writeWatchers[$id]);
+        }
+
+        return (bool) $result;
     }
 
     // ─── High-level async I/O primitives (return AsyncIOOperation) ───

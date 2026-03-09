@@ -44,7 +44,7 @@ final class RunBlocking
      */
     public static function new(
         callable|Async|Fiber $callable,
-        Dispatchers $dispatchers = Dispatchers::DEFAULT ,
+        Dispatchers $dispatchers = Dispatchers::DEFAULT,
     ): void {
         // NOTE: Dispatchers::IO on RunBlocking is treated the same as
         // DEFAULT. The closure typically contains scheduler primitives
