@@ -328,7 +328,7 @@ Flow::fromArray(range(1, 1000))
 
 ### AsyncIO — Non-blocking Stream I/O
 
-All methods return `AsyncIOOperation` — a lazy wrapper that executes on `->await()`:
+All methods return `Deferred` — a lazy wrapper that executes on `->await()`:
 
 ```php
 use vosaka\foroutines\AsyncIO;

@@ -13,7 +13,7 @@ use InvalidArgumentException;
  * Represents an asynchronous task that can be executed in a separate Foroutine.
  * This class allows you to run a function asynchronously and wait for its result.
  */
-final class Async
+final class Async implements Deferred
 {
     public function __construct(public ?Fiber $fiber)
     {
@@ -221,7 +221,7 @@ final class Async
      *
      * @return mixed The result of the asynchronous task.
      */
-    public function await(): mixed
+    public function join(): mixed
     {
         if (!$this->fiber->isStarted()) {
             $this->fiber->start();
@@ -335,5 +335,15 @@ final class Async
         // before the Async object itself is garbage-collected.
         $this->fiber = null;
         return $result;
+    }
+
+    /**
+     * Alias for join() to implement the Deferred interface.
+     * 
+     * @return mixed The result of the asynchronous task.
+     */
+    public function await(): mixed
+    {
+        return $this->join();
     }
 }

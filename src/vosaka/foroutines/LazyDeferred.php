@@ -7,10 +7,10 @@ namespace vosaka\foroutines;
 use Fiber;
 
 /**
- * AsyncIOOperation — A lazy wrapper for async I/O operations.
+ * Deferred — A lazy wrapper for async I/O operations.
  *
  * Instead of executing I/O logic immediately, AsyncIO methods return an
- * AsyncIOOperation instance. The actual work is deferred until the caller
+ * Deferred instance. The actual work is deferred until the caller
  * invokes ->await(), making the async nature of the code explicit:
  *
  *     $body = AsyncIO::httpGet('https://example.com')->await();
@@ -25,7 +25,7 @@ use Fiber;
  * the operation is wrapped in Async::new() which creates a dedicated Fiber
  * and drives the scheduler loop to completion.
  */
-final class AsyncIOOperation
+final class LazyDeferred implements Deferred
 {
     /**
      * @var callable The deferred I/O operation to execute on await().

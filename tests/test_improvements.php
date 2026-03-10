@@ -13,7 +13,7 @@ use vosaka\foroutines\{
     Dispatchers,
     WorkerPool,
     AsyncIO,
-    AsyncIOOperation,
+    Deferred,
     ForkProcess,
     Pause,
     TimeUtils,
@@ -518,19 +518,19 @@ main(function () {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// IMPROVEMENT 2b: AsyncIOOperation — Deferred ->await() pattern
+// IMPROVEMENT 2b: Deferred — Deferred ->await() pattern
 // ═════════════════════════════════════════════════════════════════════════════
 
-echo "\n\n--- IMPROVEMENT 2b: AsyncIOOperation (deferred ->await() pattern) ---";
+echo "\n\n--- IMPROVEMENT 2b: Deferred (deferred ->await() pattern) ---";
 
 main(function () {
     test(
-        "AsyncIO methods return AsyncIOOperation, not direct results",
+        "AsyncIO methods return Deferred, not direct results",
         function () {
             $op = AsyncIO::fileGetContents(__DIR__ . "/test.txt");
             assert_true(
-                $op instanceof AsyncIOOperation,
-                " — fileGetContents() should return AsyncIOOperation, got " .
+                $op instanceof Deferred,
+                " — fileGetContents() should return Deferred, got " .
                     get_class($op),
             );
 
@@ -539,38 +539,38 @@ main(function () {
                 "test",
             );
             assert_true(
-                $op2 instanceof AsyncIOOperation,
-                " — filePutContents() should return AsyncIOOperation",
+                $op2 instanceof Deferred,
+                " — filePutContents() should return Deferred",
             );
 
             $op3 = AsyncIO::dnsResolve("127.0.0.1");
             assert_true(
-                $op3 instanceof AsyncIOOperation,
-                " — dnsResolve() should return AsyncIOOperation",
+                $op3 instanceof Deferred,
+                " — dnsResolve() should return Deferred",
             );
 
             $op4 = AsyncIO::createSocketPair();
             assert_true(
-                $op4 instanceof AsyncIOOperation,
-                " — createSocketPair() should return AsyncIOOperation",
+                $op4 instanceof Deferred,
+                " — createSocketPair() should return Deferred",
             );
 
             $op5 = AsyncIO::httpGet("http://example.com");
             assert_true(
-                $op5 instanceof AsyncIOOperation,
-                " — httpGet() should return AsyncIOOperation",
+                $op5 instanceof Deferred,
+                " — httpGet() should return Deferred",
             );
 
             $op6 = AsyncIO::httpPost("http://example.com", "{}");
             assert_true(
-                $op6 instanceof AsyncIOOperation,
-                " — httpPost() should return AsyncIOOperation",
+                $op6 instanceof Deferred,
+                " — httpPost() should return Deferred",
             );
         },
     );
 
     test(
-        "AsyncIOOperation is lazy — does not execute until await()",
+        "Deferred is lazy — does not execute until await()",
         function () {
             // Create an operation targeting a nonexistent file.
             // If it were eager, it would throw immediately.
@@ -580,8 +580,8 @@ main(function () {
 
             // No exception yet — the operation is deferred
             assert_true(
-                $op instanceof AsyncIOOperation,
-                " — should return AsyncIOOperation without throwing",
+                $op instanceof Deferred,
+                " — should return Deferred without throwing",
             );
 
             // Now await() should trigger the actual execution and throw
@@ -605,7 +605,7 @@ main(function () {
         },
     );
 
-    test("AsyncIOOperation->await() works inside Fiber context", function () {
+    test("Deferred->await() works inside Fiber context", function () {
         RunBlocking::new(function () {
             $content = null;
             $testFile = __DIR__ . "/test.txt";
@@ -634,7 +634,7 @@ main(function () {
     });
 
     test(
-        "AsyncIOOperation->await() works outside Fiber context (top-level)",
+        "Deferred->await() works outside Fiber context (top-level)",
         function () {
             // Outside any Fiber — await() wraps in Async::new() internally
             $ip = AsyncIO::dnsResolve("127.0.0.1")->await();
@@ -648,7 +648,7 @@ main(function () {
     );
 
     test(
-        "Multiple AsyncIOOperation->await() calls in sequence inside Fiber",
+        "Multiple Deferred->await() calls in sequence inside Fiber",
         function () {
             RunBlocking::new(function () {
                 $file1 =
@@ -686,7 +686,7 @@ main(function () {
     );
 
     test(
-        "AsyncIOOperation->await() chaining with write then read",
+        "Deferred->await() chaining with write then read",
         function () {
             RunBlocking::new(function () {
                 $testFile =
@@ -714,7 +714,7 @@ main(function () {
     );
 
     test(
-        "AsyncIOOperation->await() with createSocketPair and stream ops",
+        "Deferred->await() with createSocketPair and stream ops",
         function () {
             RunBlocking::new(function () {
                 $received = null;

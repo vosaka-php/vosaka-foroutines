@@ -26,7 +26,7 @@ use InvalidArgumentException;
  *   - Fibers call the static helper methods (read, write, connect, etc.)
  *     which register a watcher and Fiber::suspend() until the stream is ready
  *
- * All public I/O methods return an AsyncIOOperation instance. The actual
+ * All public I/O methods return an Deferred instance. The actual
  * work is deferred until the caller invokes ->await(), making the async
  * nature of the code explicit and consistent:
  *
@@ -303,7 +303,7 @@ final class AsyncIO
         return (bool) $result;
     }
 
-    // ─── High-level async I/O primitives (return AsyncIOOperation) ───
+    // ─── High-level async I/O primitives (return Deferred) ───
 
     /**
      * Open a non-blocking TCP connection to a host:port.
@@ -314,14 +314,14 @@ final class AsyncIO
      * @param string $host Hostname or IP address.
      * @param int $port Port number.
      * @param float $timeoutSeconds Connection timeout in seconds.
-     * @return AsyncIOOperation Resolves to the connected socket stream resource.
+     * @return Deferred Resolves to the connected socket stream resource.
      */
     public static function tcpConnect(
         string $host,
         int $port,
         float $timeoutSeconds = self::CONNECT_TIMEOUT_S,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $host,
             $port,
             $timeoutSeconds,
@@ -336,14 +336,14 @@ final class AsyncIO
      * @param string $host Hostname.
      * @param int $port Port number (default 443).
      * @param float $timeoutSeconds Connection timeout.
-     * @return AsyncIOOperation Resolves to the connected TLS socket stream resource.
+     * @return Deferred Resolves to the connected TLS socket stream resource.
      */
     public static function tlsConnect(
         string $host,
         int $port = 443,
         float $timeoutSeconds = self::CONNECT_TIMEOUT_S,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $host,
             $port,
             $timeoutSeconds,
@@ -361,14 +361,14 @@ final class AsyncIO
      * @param resource $stream The stream to read from.
      * @param int $maxBytes Maximum bytes to read per call.
      * @param float $timeoutSeconds Read timeout.
-     * @return AsyncIOOperation Resolves to the data read, or empty string on EOF.
+     * @return Deferred Resolves to the data read, or empty string on EOF.
      */
     public static function streamRead(
         $stream,
         int $maxBytes = self::READ_CHUNK_SIZE,
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $stream,
             $maxBytes,
             $timeoutSeconds,
@@ -382,13 +382,13 @@ final class AsyncIO
      *
      * @param resource $stream The stream to read from.
      * @param float $timeoutSeconds Total read timeout.
-     * @return AsyncIOOperation Resolves to the complete data string.
+     * @return Deferred Resolves to the complete data string.
      */
     public static function streamReadAll(
         $stream,
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $stream,
             $timeoutSeconds,
         ): string {
@@ -405,14 +405,14 @@ final class AsyncIO
      * @param resource $stream The stream to write to.
      * @param string $data The data to write.
      * @param float $timeoutSeconds Write timeout.
-     * @return AsyncIOOperation Resolves to total bytes written (int).
+     * @return Deferred Resolves to total bytes written (int).
      */
     public static function streamWrite(
         $stream,
         string $data,
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $stream,
             $data,
             $timeoutSeconds,
@@ -432,14 +432,14 @@ final class AsyncIO
      * @param string $url Full URL (http:// or https://).
      * @param array<string, string> $headers Additional request headers (key => value).
      * @param float $timeoutSeconds Total request timeout.
-     * @return AsyncIOOperation Resolves to the response body string.
+     * @return Deferred Resolves to the response body string.
      */
     public static function httpGet(
         string $url,
         array $headers = [],
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $url,
             $headers,
             $timeoutSeconds,
@@ -456,7 +456,7 @@ final class AsyncIO
      * @param array<string, string> $headers Additional headers.
      * @param string $contentType Content-Type header value.
      * @param float $timeoutSeconds Total request timeout.
-     * @return AsyncIOOperation Resolves to the response body string.
+     * @return Deferred Resolves to the response body string.
      */
     public static function httpPost(
         string $url,
@@ -464,8 +464,8 @@ final class AsyncIO
         array $headers = [],
         string $contentType = "application/json",
         float $timeoutSeconds = self::STREAM_TIMEOUT_S,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $url,
             $body,
             $headers,
@@ -493,11 +493,11 @@ final class AsyncIO
      * yielding pattern for very large files and keeps the API consistent.
      *
      * @param string $filePath Path to the file.
-     * @return AsyncIOOperation Resolves to the file contents string.
+     * @return Deferred Resolves to the file contents string.
      */
-    public static function fileGetContents(string $filePath): AsyncIOOperation
+    public static function fileGetContents(string $filePath): Deferred
     {
-        return new AsyncIOOperation(static function () use ($filePath): string {
+        return new LazyDeferred(static function () use ($filePath): string {
             return self::doFileGetContents($filePath);
         });
     }
@@ -508,14 +508,14 @@ final class AsyncIO
      * @param string $filePath Path to the file.
      * @param string $data Data to write.
      * @param int $flags Same as file_put_contents flags (FILE_APPEND, LOCK_EX, etc.)
-     * @return AsyncIOOperation Resolves to bytes written (int).
+     * @return Deferred Resolves to bytes written (int).
      */
     public static function filePutContents(
         string $filePath,
         string $data,
         int $flags = 0,
-    ): AsyncIOOperation {
-        return new AsyncIOOperation(static function () use (
+    ): Deferred {
+        return new LazyDeferred(static function () use (
             $filePath,
             $data,
             $flags,
@@ -535,11 +535,11 @@ final class AsyncIO
      * the lookup to a child process.
      *
      * @param string $hostname The hostname to resolve.
-     * @return AsyncIOOperation Resolves to the resolved IP address string.
+     * @return Deferred Resolves to the resolved IP address string.
      */
-    public static function dnsResolve(string $hostname): AsyncIOOperation
+    public static function dnsResolve(string $hostname): Deferred
     {
-        return new AsyncIOOperation(static function () use ($hostname): string {
+        return new LazyDeferred(static function () use ($hostname): string {
             return self::doDnsResolve($hostname);
         });
     }
@@ -550,11 +550,11 @@ final class AsyncIO
      * Useful for in-process fiber-to-fiber communication via streams,
      * e.g. piping data between a producer and consumer fiber.
      *
-     * @return AsyncIOOperation Resolves to array{0: resource, 1: resource} [readable, writable] socket pair.
+     * @return Deferred Resolves to array{0: resource, 1: resource} [readable, writable] socket pair.
      */
-    public static function createSocketPair(): AsyncIOOperation
+    public static function createSocketPair(): Deferred
     {
-        return new AsyncIOOperation(static function (): array {
+        return new LazyDeferred(static function (): array {
             return self::doCreateSocketPair();
         });
     }
