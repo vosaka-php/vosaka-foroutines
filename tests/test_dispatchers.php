@@ -86,9 +86,7 @@ main(function () {
             var_dump('DEFAULT task B done');
         }, Dispatchers::DEFAULT);
 
-        Thread::await();
     });
-    Thread::await();
 
     // ================================================================
     // Test 2: Dispatchers::DEFAULT with Async - returns a computed value
@@ -103,9 +101,7 @@ main(function () {
         $result = $async->await();
         var_dump("Async DEFAULT result: $result");
 
-        Thread::await();
     });
-    Thread::await();
 
     // ================================================================
     // Test 3: Dispatchers::IO with Launch - runs in child process
@@ -116,10 +112,8 @@ main(function () {
             echo "IO task says hello\n";
         }, Dispatchers::IO);
 
-        Thread::await();
         var_dump('IO launch completed');
     });
-    Thread::await();
 
     // ================================================================
     // Test 4: Dispatchers::IO with Async - returns value from child process
@@ -133,9 +127,7 @@ main(function () {
         $result = $async->await();
         var_dump("IO async result: $result");
 
-        Thread::await();
     });
-    Thread::await();
 
     // ================================================================
     // Test 5: Dispatchers::IO performing file I/O in child process
@@ -157,9 +149,7 @@ main(function () {
         $async->await();
         var_dump('File written by IO task');
 
-        Thread::await();
     });
-    Thread::await();
 
     if (file_exists($testFile)) {
         $content = file_get_contents($testFile);
@@ -184,10 +174,8 @@ main(function () {
             }, Dispatchers::DEFAULT);
         }
 
-        Thread::await();
         var_dump("Counter after 5 concurrent increments: $counter");
     });
-    Thread::await();
 
     // ================================================================
     // Test 7: Dispatchers::IO with RunBlocking
@@ -196,7 +184,6 @@ main(function () {
     RunBlocking::new(function () {
         echo "RunBlocking IO: task ran\n";
     }, Dispatchers::IO);
-    Thread::await();
     var_dump('RunBlocking IO completed');
 
     // ================================================================
@@ -206,7 +193,6 @@ main(function () {
     RunBlocking::new(function () {
         var_dump('RunBlocking DEFAULT: task ran');
     }, Dispatchers::DEFAULT);
-    Thread::await();
 
     // ================================================================
     // Test 9: Mixed dispatchers in a single RunBlocking block
@@ -219,10 +205,8 @@ main(function () {
             var_dump('Mixed: DEFAULT task done');
         }, Dispatchers::DEFAULT);
 
-        Thread::await();
         var_dump('Mixed: all done');
     });
-    Thread::await();
 
     // ================================================================
     // Test 10: Dispatchers::IO returning complex data (array)
@@ -241,9 +225,7 @@ main(function () {
         var_dump('IO returned array count: ' . count($result));
         var_dump('IO returned array sum: ' . array_sum($result));
 
-        Thread::await();
     });
-    Thread::await();
 
     // ================================================================
     // Test 11: Dispatchers::DEFAULT Async with Delay inside
@@ -258,9 +240,7 @@ main(function () {
         $result = $async->await();
         var_dump("DEFAULT async with delay: $result");
 
-        Thread::await();
     });
-    Thread::await();
 
     // ================================================================
     // Test 12: Dispatchers::IO returns null correctly
@@ -275,9 +255,7 @@ main(function () {
         $result = $async->await();
         var_dump('IO null result is null: ' . ($result === null ? 'yes' : 'no'));
 
-        Thread::await();
     });
-    Thread::await();
 
     var_dump('All Dispatcher tests passed');
 });

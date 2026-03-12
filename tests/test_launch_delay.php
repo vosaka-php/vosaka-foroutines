@@ -45,10 +45,8 @@ main(function () {
             var_dump('Medium done');
         });
 
-        Thread::await();
     });
 
-    Thread::await();
 
     $elapsed = round(microtime(true) - $time, 2);
     var_dump('All launches completed');

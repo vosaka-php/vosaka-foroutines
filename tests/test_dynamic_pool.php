@@ -70,10 +70,8 @@ main(function () {
         // Use awaitAll to collect all results concurrently
         $results = Async::awaitAll(...$asyncs);
 
-        Thread::await();
     });
 
-    Thread::await();
 
     // Check peak — the pool should have scaled beyond the initial 2
     $afterTaskWorkerCount = WorkerPoolState::workerCount();
@@ -179,10 +177,8 @@ main(function () {
 
         $postScaleResults = Async::awaitAll(...$asyncs);
 
-        Thread::await();
     });
 
-    Thread::await();
 
     $postScaleCorrect = true;
     for ($i = 0; $i < 5; $i++) {
@@ -235,10 +231,8 @@ main(function () {
 
         $fixedResults = Async::awaitAll(...$asyncs);
 
-        Thread::await();
     });
 
-    Thread::await();
 
     $fixedWorkerCount = WorkerPoolState::workerCount();
     var_dump("  Worker count (should stay at 3): $fixedWorkerCount");

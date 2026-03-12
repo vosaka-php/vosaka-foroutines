@@ -132,10 +132,8 @@ main(function () {
         }
 
         echo "\n\n";
-        Thread::await();
     });
 
-    Thread::await();
 
     $totalTime = round(microtime(true) - $startTime, 2);
 

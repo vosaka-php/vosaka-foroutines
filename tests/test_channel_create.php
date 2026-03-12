@@ -257,7 +257,6 @@ main(function () {
             assert($val === "io_val_{$i}");
         }
     });
-    Thread::await();
     var_dump("Test 6 passed");
     teardown($ch6);
 
@@ -303,9 +302,7 @@ main(function () {
         assert($sum === 45, "Expected sum=45 but got: " . var_export($sum, true));
 
         $ch7->close();
-        Thread::await();
     });
-    Thread::await();
     var_dump("Test 7 passed");
     teardown($ch7);
 

@@ -198,9 +198,7 @@ main(function () {
             EventLoop::runNext();
         }
 
-        Thread::await();
     });
-    Thread::await();
 
     // ================================================================
     // Test 9: Multiple EventLoop fibers interleave correctly

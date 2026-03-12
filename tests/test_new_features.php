@@ -285,7 +285,6 @@ main(function () {
                 $results[] = "B";
             });
 
-            Thread::await();
 
             assert_eq(2, count($results), " — both Launch jobs should complete");
         });
@@ -368,7 +367,6 @@ main(function () {
             $actor->stop();
 
             // Wait for everything to complete
-            Thread::await();
 
             $received = $actor->log;
         });
@@ -414,7 +412,6 @@ main(function () {
             Delay::new(30);
 
             $actor->stop();
-            Thread::await();
 
             $lifecycle = $actor->events;
         });
@@ -482,7 +479,6 @@ main(function () {
             Delay::new(50);
 
             $system->stopAll();
-            Thread::await();
         });
 
         assert_gt(
@@ -574,7 +570,6 @@ main(function () {
             Delay::new(80);
 
             $sup->stop();
-            Thread::await();
         });
 
         assert_true(
@@ -612,7 +607,6 @@ main(function () {
             Delay::new(600);
 
             $sup->stop();
-            Thread::await();
         });
 
         assert_gt(
@@ -637,7 +631,6 @@ main(function () {
             $sup->stop();
             assert_true(!$sup->isRunning(), " — should not be running after stop");
 
-            Thread::await();
         });
     });
 });

@@ -475,7 +475,6 @@ main(function () {
             assert($val === "io_hello_{$i}");
         }
     });
-    Thread::await();
     var_dump("Test 17 passed");
     teardownSocket($ch17);
 
@@ -530,9 +529,7 @@ main(function () {
         );
 
         $ch18->close();
-        Thread::await();
     });
-    Thread::await();
     var_dump("Test 18 passed");
     teardownSocket($ch18);
 

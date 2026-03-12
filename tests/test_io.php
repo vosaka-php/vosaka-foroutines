@@ -79,10 +79,8 @@ main(function () {
         var_dump($result1["message"]);
         var_dump($result1["arr"]);
 
-        Thread::await();
     });
 
-    Thread::await();
 
     var_dump("All IO dispatcher tests OK");
 });

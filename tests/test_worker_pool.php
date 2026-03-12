@@ -39,10 +39,7 @@ main(function () {
         $result = $async->await();
         echo "Direct WorkerPool result: {$result}\n";
         assert($result === 42, "Expected 42, got {$result}");
-
-        Thread::await();
     });
-    Thread::await();
 
     $elapsed = round((microtime(true) - $startTime) * 1000);
     echo "  (completed in {$elapsed}ms)\n\n";
@@ -62,10 +59,7 @@ main(function () {
         $result = $async->await();
         echo "IO async result: {$result}\n";
         assert($result === 999, "Expected 999, got {$result}");
-
-        Thread::await();
     });
-    Thread::await();
 
     $elapsed = round((microtime(true) - $startTime) * 1000);
     echo "  (completed in {$elapsed}ms)\n\n";
@@ -98,10 +92,7 @@ main(function () {
         assert($results[1] === 1, "Expected 1");
         assert($results[2] === 4, "Expected 4");
         assert($results[3] === 9, "Expected 9");
-
-        Thread::await();
     });
-    Thread::await();
 
     $elapsed = round((microtime(true) - $startTime) * 1000);
     echo "  (completed in {$elapsed}ms)\n\n";
@@ -122,10 +113,7 @@ main(function () {
         assert($result['name'] === 'vosaka');
         assert($result['version'] === 1);
         assert($result['items'] === [1, 2, 3]);
-
-        Thread::await();
     });
-    Thread::await();
     echo "\n";
 
     // ================================================================
@@ -142,10 +130,7 @@ main(function () {
         $isNull = $result === null ? 'yes' : 'no';
         echo "  Result is null: {$isNull}\n";
         assert($result === null, "Expected null");
-
-        Thread::await();
     });
-    Thread::await();
     echo "\n";
 
     // ================================================================
@@ -159,10 +144,8 @@ main(function () {
             return 'launched';
         }, Dispatchers::IO);
 
-        Thread::await();
         echo "  IO Launch completed\n";
     });
-    Thread::await();
     echo "\n";
 
     // ================================================================
@@ -187,10 +170,7 @@ main(function () {
         echo "  Result 2: {$r2}\n";
         assert($r1 === 'batch2_a');
         assert($r2 === 'batch2_b');
-
-        Thread::await();
     });
-    Thread::await();
 
     $elapsed = round((microtime(true) - $startTime) * 1000);
     echo "  (completed in {$elapsed}ms - should be faster due to reuse)\n\n";
@@ -213,10 +193,7 @@ main(function () {
 
         $result = $async->await();
         assert($result === true);
-
-        Thread::await();
     });
-    Thread::await();
 
     if (file_exists($testFile)) {
         $content = file_get_contents($testFile);

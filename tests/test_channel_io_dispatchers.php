@@ -134,9 +134,7 @@ function main()
             var_dump("Received: $val");
         }
 
-        Thread::await();
     });
-    Thread::await();
 
     teardown($ch1);
     var_dump("Test 1 passed");
@@ -169,9 +167,7 @@ function main()
 
         $result = $async->await();
         var_dump("IO consumer sum: $result");
-        Thread::await();
     });
-    Thread::await();
 
     teardown($ch2);
     var_dump("Test 2 passed");
@@ -215,9 +211,7 @@ function main()
         $result = $consumer->await();
         var_dump("IO consumer sum of squares: $result");
 
-        Thread::await();
     });
-    Thread::await();
 
     teardown($ch3);
     var_dump("Test 3 passed");
@@ -262,9 +256,7 @@ function main()
             var_dump("Pong $i: $pong");
         }
 
-        Thread::await();
     });
-    Thread::await();
 
     teardown($chReq);
     teardown($chRes);
@@ -312,9 +304,7 @@ function main()
         var_dump("Fan-in count: " . count($items));
         var_dump("Fan-in sum: " . array_sum($items));
 
-        Thread::await();
     });
-    Thread::await();
 
     teardown($ch5);
     var_dump("Test 5 passed");
@@ -355,9 +345,7 @@ function main()
             "int=$intVal float=$floatVal string=$strVal bool=$boolStr arrayLen=$arrLen",
         );
 
-        Thread::await();
     });
-    Thread::await();
 
     teardown($ch6);
     var_dump("Test 6 passed");
@@ -392,9 +380,7 @@ function main()
             "Content matches: " . ($received === $largePayload ? "yes" : "no"),
         );
 
-        Thread::await();
     });
-    Thread::await();
 
     teardown($ch7);
     var_dump("Test 7 passed");
@@ -425,9 +411,7 @@ function main()
         // isClosed() reloads state from the backing file
         var_dump("Channel closed by IO: " . ($ch8->isClosed() ? "yes" : "no"));
 
-        Thread::await();
     });
-    Thread::await();
 
     $ch8->cleanup();
     var_dump("Test 8 passed");
@@ -455,9 +439,7 @@ function main()
         $val = $ch9->tryReceive();
         var_dump("Main got: $val");
 
-        Thread::await();
     });
-    Thread::await();
 
     teardown($ch9);
     var_dump("Test 9 passed");
@@ -497,9 +479,7 @@ function main()
 
         $result = $async->await();
         var_dump("Pipeline result: $result");
-        Thread::await();
     });
-    Thread::await();
     var_dump("Test 10 passed");
 
     var_dump("All Channel IO Dispatcher tests passed!");

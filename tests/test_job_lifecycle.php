@@ -139,9 +139,7 @@ main(function () {
             "Is final before execution: " . ($job->isFinal() ? "yes" : "no"),
         );
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 3: Job completes after Thread::await
@@ -152,7 +150,6 @@ main(function () {
             var_dump("Task ran");
         });
 
-        Thread::await();
 
         var_dump("Is completed: " . ($job->isCompleted() ? "yes" : "no"));
         var_dump("Is final: " . ($job->isFinal() ? "yes" : "no"));
@@ -161,7 +158,6 @@ main(function () {
             "End time is set: " . ($job->getEndTime() !== null ? "yes" : "no"),
         );
     });
-    Thread::await();
 
     // ==========================================================
     // Test 4: Job cancellation
@@ -179,9 +175,7 @@ main(function () {
         var_dump("Is final: " . ($job->isFinal() ? "yes" : "no"));
         var_dump("Status: " . $job->getStatus()->value);
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 5: Cancel after complete throws RuntimeException
@@ -192,7 +186,6 @@ main(function () {
             // Quick task
         });
 
-        Thread::await();
 
         try {
             $job->cancel();
@@ -201,7 +194,6 @@ main(function () {
             var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::await();
 
     // ==========================================================
     // Test 6: Cancel after failed throws
@@ -213,7 +205,6 @@ main(function () {
         });
 
         try {
-            Thread::await();
         } catch (RuntimeException $e) {
             // Expected - the job threw
         }
@@ -225,7 +216,6 @@ main(function () {
             var_dump("Caught cancel-after-fail: " . $e->getMessage());
         }
     });
-    Thread::await();
 
     // ==========================================================
     // Test 7: invokeOnCompletion fires on cancel
@@ -244,9 +234,7 @@ main(function () {
 
         $job->cancel();
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 8: invokeOnCompletion fires on complete
@@ -263,9 +251,7 @@ main(function () {
             );
         });
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 9: invokeOnCompletion on already final job throws
@@ -276,7 +262,6 @@ main(function () {
             // Quick task
         });
 
-        Thread::await();
 
         try {
             $job->invokeOnCompletion(function (Job $j) {
@@ -287,7 +272,6 @@ main(function () {
             var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::await();
 
     // ==========================================================
     // Test 10: onJoin callback fires on complete
@@ -302,9 +286,7 @@ main(function () {
             var_dump("onJoin fired, state: " . $j->getStatus()->value);
         });
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 11: onJoin on already final job throws
@@ -315,7 +297,6 @@ main(function () {
             // Quick task
         });
 
-        Thread::await();
 
         try {
             $job->onJoin(function (Job $j) {
@@ -326,7 +307,6 @@ main(function () {
             var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::await();
 
     // ==========================================================
     // Test 12: cancelAfter sets timeout (isTimedOut)
@@ -344,9 +324,7 @@ main(function () {
         );
 
         $job->cancel(); // cancel manually so we don't wait
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 13: cancelAfter on already final job throws
@@ -357,7 +335,6 @@ main(function () {
             // Quick task
         });
 
-        Thread::await();
 
         try {
             $job->cancelAfter(5.0);
@@ -366,7 +343,6 @@ main(function () {
             var_dump("Caught: " . $e->getMessage());
         }
     });
-    Thread::await();
 
     // ==========================================================
     // Test 14: getStartTime returns a valid time
@@ -380,9 +356,7 @@ main(function () {
         $startTime = $job->getStartTime();
         var_dump("Start time is positive: " . ($startTime > 0 ? "yes" : "no"));
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 15: getEndTime is null before completion
@@ -399,9 +373,7 @@ main(function () {
                 ($endTime === null ? "NULL" : $endTime),
         );
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 16: Multiple invokeOnCompletion callbacks
@@ -422,9 +394,7 @@ main(function () {
             var_dump("Callback 3 fired");
         });
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 17: Multiple onJoin callbacks
@@ -442,9 +412,7 @@ main(function () {
             var_dump("Join callback B fired");
         });
 
-        Thread::await();
     });
-    Thread::await();
 
     // ==========================================================
     // Test 18: Job with Delay completes normally
@@ -456,13 +424,11 @@ main(function () {
             var_dump("Delayed task done");
         });
 
-        Thread::await();
 
         var_dump(
             "Delayed job completed: " . ($job->isCompleted() ? "yes" : "no"),
         );
     });
-    Thread::await();
 
     var_dump("All Job lifecycle tests passed");
 });

@@ -136,8 +136,6 @@ main(function () {
             Delay::new(500);
             var_dump('Task 2 done');
         });
-
-        Thread::await();
     });
 });
 ```
@@ -252,7 +250,6 @@ main(function () {
             var_dump($ch->receive()); // "from child 2"
         });
 
-        Thread::await();
         $ch->close();
     });
 });
@@ -375,7 +372,22 @@ use vosaka\foroutines\{RunBlocking, Launch, Dispatchers, Thread};
 
 RunBlocking::new(function () {
     Launch::new(fn() => heavy_io_work(), Dispatchers::IO);
-    Thread::await();
+});
+```
+
+### Thread::await()
+
+While `RunBlocking` automatically drains all pending tasks before returning, `Thread::await()` allows you to manually block and drive the event loop until all work (Launch jobs, WorkerPool tasks, and AsyncIO) is finished.
+
+**When do you need it?**
+- **Inside `RunBlocking`**: If you want to ensure all background tasks (like `Launch` jobs) are completed *before* proceeding to the next line of code *within* the same `RunBlocking` block.
+- **Outside `RunBlocking`**: When you are using `AsyncMain` or `main()` and have scheduled tasks that need to be completed before the script exits, but you aren't using a blocking runner.
+
+```php
+RunBlocking::new(function () {
+    Launch::new(fn() => print("A"));
+    Thread::await(); // Blocks here until "A" is printed
+    print("B");      // Always prints after "A"
 });
 ```
 
@@ -493,7 +505,6 @@ main(function () {
 
         Delay::new(100);
         $system->stopAll();
-        Thread::await();
     });
 });
 ```
@@ -511,8 +522,6 @@ main(function () {
             ->child(fn() => workerA(), 'worker-a')
             ->child(fn() => workerB(), 'worker-b', maxRestarts: 5)
             ->start();
-
-        Thread::await();
     });
 });
 ```

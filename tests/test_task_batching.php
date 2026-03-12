@@ -66,10 +66,8 @@ function runBatchTest(int $batchSize): array
         // Await all concurrently
         $results = Async::awaitAll(...$asyncs);
 
-        Thread::await();
     });
 
-    Thread::await();
 
     $elapsed = (hrtime(true) - $start) / 1_000_000; // ms
 
@@ -198,10 +196,8 @@ main(function () {
             $errorResults[2] = $asyncOk2->await();
         } catch (\Throwable $e) {}
 
-        Thread::await();
     });
 
-    Thread::await();
 
     WorkerPool::shutdown();
     WorkerPool::resetState();

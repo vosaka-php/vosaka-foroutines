@@ -57,9 +57,7 @@ main(function () {
             );
         }
 
-        Thread::await();
     });
-    Thread::await();
 
     debug("");
     debug("=== Test 2: Multiple concurrent tasks ===");
@@ -87,9 +85,7 @@ main(function () {
             debug("FAIL: Unexpected results");
         }
 
-        Thread::await();
     });
-    Thread::await();
 
     debug("");
     debug("=== Shutdown ===");

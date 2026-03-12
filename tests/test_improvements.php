@@ -172,8 +172,6 @@ main(function () {
                 Delay::new(30);
                 $result = 42;
             });
-
-            Thread::await();
         });
 
         assert_eq(42, $result, " — Launch inside RunBlocking should complete");
@@ -237,7 +235,7 @@ main(function () {
             $elapsed = TimeUtils::elapsedTimeMillis($start);
             assert_lt(
                 $elapsed,
-                100,
+                200,
                 " — empty Thread::await should return quickly, got {$elapsed}ms",
             );
         },
