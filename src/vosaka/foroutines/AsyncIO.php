@@ -103,8 +103,8 @@ final class AsyncIO
         $readStreams = [];
         $readMap = [];
         foreach (self::$readWatchers as $id => $watcher) {
-            if (!is_resource($watcher["stream"]) || feof($watcher["stream"])) {
-                // Stream closed or EOF — resume fiber so it can handle it
+            if (!is_resource($watcher["stream"])) {
+                // Stream closed — resume fiber so it can handle it
                 $fiber = $watcher["fiber"];
                 unset(self::$readWatchers[$id]);
                 if ($fiber->isSuspended()) {
@@ -138,6 +138,7 @@ final class AsyncIO
         $except = null;
         $readReady = array_values($readStreams);
         $writeReady = array_values($writeStreams);
+        $except = null;
 
         // Non-blocking select — returns immediately or waits at most SELECT_TIMEOUT_US
         $changed = @stream_select(
@@ -154,7 +155,6 @@ final class AsyncIO
 
         $didWork = false;
 
-        // Resume fibers whose read streams are ready
         if ($readReady) {
             foreach ($readReady as $stream) {
                 $streamId = (int) $stream;
@@ -164,7 +164,7 @@ final class AsyncIO
                         $fiber = self::$readWatchers[$watcherId]["fiber"];
                         unset(self::$readWatchers[$watcherId]);
                         if ($fiber->isSuspended()) {
-                            $fiber->resume(true); // signal: stream is ready
+                            $fiber->resume(true);
                             $didWork = true;
                         }
                     }
@@ -241,11 +241,15 @@ final class AsyncIO
      * When stream_select() detects the stream is readable, the Fiber will
      * be resumed with `true`. On EOF/error, it will be resumed with `false`.
      *
+     * IMPORTANT: If the scheduler resumes the fiber without an argument (spurious
+     * wake-up), this method returns `null`. Callers MUST check for null and
+     * typically continue their I/O loop.
+     *
      * @param resource $stream The stream to watch for readability.
-     * @return bool True if the stream became ready, false on EOF/error.
+     * @return bool|null True if ready, false on EOF/error, null on spurious wake-up.
      * @throws RuntimeException If called outside a Fiber context.
      */
-    private static function waitForRead($stream): bool
+    private static function waitForRead($stream): ?bool
     {
         $fiber = Fiber::getCurrent();
         if ($fiber === null) {
@@ -261,24 +265,25 @@ final class AsyncIO
             "fiber" => $fiber,
         ];
 
-        // Suspend — the scheduler's pollOnce() will resume us
+        // Suspend — the scheduler's pollOnce() will resume us with true/false,
+        // or the scheduler loop will resume us with null.
         $result = Fiber::suspend();
 
         if (isset(self::$readWatchers[$id])) {
             unset(self::$readWatchers[$id]);
         }
 
-        return (bool) $result;
+        return $result === null ? null : (bool) $result;
     }
 
     /**
      * Register a write watcher for the given stream and suspend the current Fiber.
      *
      * @param resource $stream The stream to watch for writability.
-     * @return bool True if the stream became ready, false on error.
+     * @return bool|null True if ready, false on error, null on spurious wake-up.
      * @throws RuntimeException If called outside a Fiber context.
      */
-    private static function waitForWrite($stream): bool
+    private static function waitForWrite($stream): ?bool
     {
         $fiber = Fiber::getCurrent();
         if ($fiber === null) {
@@ -300,7 +305,7 @@ final class AsyncIO
             unset(self::$writeWatchers[$id]);
         }
 
-        return (bool) $result;
+        return $result === null ? null : (bool) $result;
     }
 
     // ─── High-level async I/O primitives (return Deferred) ───
@@ -598,6 +603,12 @@ final class AsyncIO
         $start = microtime(true);
         while (true) {
             $ready = self::waitForWrite($socket);
+
+            if ($ready === null) {
+                // Spurious scheduler wake-up
+                continue;
+            }
+
             if ($ready) {
                 // Verify the connection actually succeeded
                 $error = socket_get_status($socket);
@@ -688,11 +699,11 @@ final class AsyncIO
             // Try reading immediately — data might already be buffered
             $data = @fread($stream, $maxBytes);
 
-            if ($data !== false && strlen($data) > 0) {
+            if ($data !== false && $data !== "") {
                 return $data;
             }
 
-            if (feof($stream)) {
+            if ($data === false) {
                 return "";
             }
 
@@ -702,11 +713,26 @@ final class AsyncIO
                 );
             }
 
-            // No data yet — register watcher and suspend
+            // No data right now — register watcher and suspend until stream_select says it's ready.
             $ready = self::waitForRead($stream);
-            if (!$ready) {
-                return ""; // EOF or stream closed
+
+            if ($ready === null) {
+                // Spurious scheduler wake-up — loop again and try fread
+                continue;
             }
+
+            if (!$ready) {
+                return ""; // Stream closed (signalled by pollOnce)
+            }
+
+            // pollOnce (via stream_select) said the stream is readable.
+            // Attempt a read. If it's STILL empty, it definitively means EOF.
+            $data = @fread($stream, $maxBytes);
+            if ($data === false || $data === "") {
+                return "";
+            }
+
+            return $data;
         }
     }
 
@@ -795,6 +821,11 @@ final class AsyncIO
             }
 
             $ready = self::waitForWrite($stream);
+
+            if ($ready === null) {
+                continue;
+            }
+
             if (!$ready) {
                 throw new RuntimeException(
                     "Stream became unwritable after {$written}/{$totalLength} bytes",

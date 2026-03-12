@@ -21,53 +21,48 @@ require "../vendor/autoload.php";
 use vosaka\foroutines\Async;
 use vosaka\foroutines\Delay;
 use vosaka\foroutines\RunBlocking;
-use vosaka\foroutines\Thread;
 
 use function vosaka\foroutines\main;
 
 main(function () {
-    RunBlocking::new(function () {
-        var_dump("Starting async tasks...");
+	RunBlocking::new(function () {
+		var_dump("Starting async tasks...");
 
-        // Async that returns an integer after a short delay
-        $asyncA = Async::new(function () {
-            Delay::new(500);
-            return 42;
-        });
+		// Async that returns an integer after a short delay
+		$asyncA = Async::new(function () {
+			Delay::new(500);
+			return 42;
+		});
 
-        // Async that returns a string after a longer delay
-        $asyncB = Async::new(function () {
-            Delay::new(800);
-            return "hello world";
-        });
+		// Async that returns a string after a longer delay
+		$asyncB = Async::new(function () {
+			Delay::new(800);
+			return "hello world";
+		});
 
-        // Async that does a computation
-        $asyncC = Async::new(function () {
-            Delay::new(300);
-            $sum = 0;
-            for ($i = 1; $i <= 24; $i++) {
-                $sum += $i;
-            }
-            return $sum; // 300
-        });
+		// Async that does a computation
+		$asyncC = Async::new(function () {
+			Delay::new(300);
+			$sum = 0;
+			for ($i = 1; $i <= 24; $i++) {
+				$sum += $i;
+			}
+			return $sum; // 300
+		});
 
-        // Wait for all results - they run concurrently so total time
-        // should be ~800ms (the longest), not 500+800+300=1600ms
-        $resultA = $asyncA->await();
-        var_dump("Result A: $resultA");
+		// Wait for all results - they run concurrently so total time
+		// should be ~800ms (the longest), not 500+800+300=1600ms
+		$resultA = $asyncA->await();
+		var_dump("Result A: $resultA");
 
-        $resultB = $asyncB->await();
-        var_dump("Result B: $resultB");
+		$resultB = $asyncB->await();
+		var_dump("Result B: $resultB");
 
-        $resultC = $asyncC->await();
-        var_dump("Result C: $resultC");
+		$resultC = $asyncC->await();
+		var_dump("Result C: $resultC");
 
-        var_dump("Sum of A + C: " . ($resultA + $resultC));
+		var_dump("Sum of A + C: " . ($resultA + $resultC));
+	});
 
-        Thread::await();
-    });
-
-    Thread::await();
-
-    var_dump("All async tasks completed");
+	var_dump("All async tasks completed");
 });
