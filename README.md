@@ -3,6 +3,14 @@
 A PHP library for structured asynchronous programming using foroutines (fiber + coroutines), inspired by Kotlin coroutines.
 This is project with the contribution of a project from [php-async](https://github.com/terremoth/php-async)
 
+## 📚 Documentation
+
+New to VOsaka Foroutines? Check out our **[Structured Documentation](./docs/README.md)** (following the Diátaxis framework), which includes:
+- **Tutorials**: Step-by-step learning lessons.
+- **How-to Guides**: Task-oriented recipes for common problems.
+- **Reference**: Detailed technical descriptions of the API.
+- **Explanation**: Conceptual overviews and architectural deep-dives.
+
 ## Architecture
 
 ```
