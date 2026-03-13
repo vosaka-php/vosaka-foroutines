@@ -1,3 +1,13 @@
+# How-to: IPC Communication (Channels)
+
+Channels are the primary way to communicate data between different coroutines or even different processes.
+
+## Inter-Process Communication (IPC)
+By using `Channel::create()`, you create a socket-backed channel that can be shared between a parent process and its child workers (launched via the `IO` dispatcher).
+
+## Implementation Example
+
+```php
 <?php
 
 require_once __DIR__ . '/../../vendor/autoload.php';
@@ -7,12 +17,6 @@ use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\Dispatchers;
 use vosaka\foroutines\channel\Channel;
-
-/**
- * How-to: IPC Communication (Channels)
- * 
- * This guide shows how to communicate between a parent and a child process.
- */
 
 main(function () {
     // Create a pool-backed IPC channel with capacity 5
@@ -38,3 +42,4 @@ main(function () {
         $ch->close();
     });
 });
+```

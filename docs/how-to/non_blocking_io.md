@@ -1,3 +1,15 @@
+# How-to: Non-blocking IO
+
+VOsaka Foroutines provides the `AsyncIO` utility to handle network and file operations without blocking the main event loop.
+
+## Key Features
+- **Network**: HTTP GET/POST, TCP/TLS connections.
+- **Files**: Non-blocking `file_get_contents` and `file_put_contents`.
+- **DNS**: Non-blocking hostname resolution.
+
+## Implementation Example
+
+```php
 <?php
 
 require_once __DIR__ . '/../../vendor/autoload.php';
@@ -5,13 +17,6 @@ require_once __DIR__ . '/../../vendor/autoload.php';
 use function vosaka\foroutines\main;
 use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\AsyncIO;
-
-/**
- * How-to: Non-blocking IO
- * 
- * Learn how to perform network and file operations without blocking 
- * the entire process.
- */
 
 main(function () {
     RunBlocking::new(function () {
@@ -29,3 +34,4 @@ main(function () {
         echo "\nDone.\n";
     });
 });
+```

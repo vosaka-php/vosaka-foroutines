@@ -1,3 +1,15 @@
+# How-to: Background Tasks (WorkerPool)
+
+When a task is CPU-intensive (e.g., heavy math, image processing), it should be offloaded to a `WorkerPool` so it doesn't block the main process.
+
+## WorkerPool Features
+- **Dynamic Scaling**: Automatically spawns new workers under load.
+- **Task Batching**: Groups small tasks together for efficient IPC.
+- **Automatic Respawn**: Restarts workers if they crash.
+
+## Implementation Example
+
+```php
 <?php
 
 require_once __DIR__ . '/../../vendor/autoload.php';
@@ -7,12 +19,6 @@ use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\Dispatchers;
 use vosaka\foroutines\WorkerPool;
-
-/**
- * How-to: Background Tasks (WorkerPool)
- * 
- * Learn how to offload CPU-intensive work to a pool of child processes.
- */
 
 main(function () {
     // Configure the worker pool
@@ -46,3 +52,4 @@ main(function () {
 
     });
 });
+```

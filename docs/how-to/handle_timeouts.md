@@ -1,3 +1,18 @@
+# How-to: Handling Timeouts
+
+Learn how to set limits on how long a task can run using `WithTimeout` and `WithTimeoutOrNull`.
+
+## Timeout Strategies
+
+### 1. WithTimeout
+Throws a `RuntimeException` if the task exceeds the given time limit.
+
+### 2. WithTimeoutOrNull
+Returns `null` instead of throwing an exception if the timeout is reached.
+
+## Implementation Example
+
+```php
 <?php
 
 require_once __DIR__ . '/../../vendor/autoload.php';
@@ -7,12 +22,6 @@ use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\WithTimeout;
 use vosaka\foroutines\WithTimeoutOrNull;
 use vosaka\foroutines\Delay;
-
-/**
- * How-to: Handling Timeouts
- * 
- * Learn how to set limits on how long a task can run.
- */
 
 main(function () {
     RunBlocking::new(function () {
@@ -40,3 +49,4 @@ main(function () {
         }
     });
 });
+```

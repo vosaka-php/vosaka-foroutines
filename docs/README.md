@@ -5,16 +5,16 @@ Welcome to the VOsaka Foroutines documentation. This documentation is organized 
 ## 🎓 [Tutorials](./tutorials/)
 *Learning-oriented lessons for beginners.*
 
-- **[Getting Started](./tutorials/01_getting_started.php)**: Install the library and run your first async code.
-- **[Concurrency Basics](./tutorials/02_concurrency_basics.php)**: Learn about `Launch` vs `Async`.
+- **[Getting Started](./tutorials/01_getting_started.md)**: Install the library and run your first async code.
+- **[Concurrency Basics](./tutorials/02_concurrency_basics.md)**: Learn about `Launch` vs `Async`.
 
 ## 🛠️ [How-to Guides](./how-to/)
 *Task-oriented guides to solve specific problems.*
 
-- **[Handling Timeouts](./how-to/handle_timeouts.php)**: Prevent tasks from running too long.
-- **[IPC Communication](./how-to/ipc_communication.php)**: Communicate between processes using Channels.
-- **[Non-blocking IO](./how-to/non_blocking_io.php)**: Fetch URLs and read files without blocking.
-- **[Background Tasks](./how-to/background_tasks.php)**: Scale heavy CPU tasks using the WorkerPool.
+- **[Handling Timeouts](./how-to/handle_timeouts.md)**: Prevent tasks from running too long.
+- **[IPC Communication](./how-to/ipc_communication.md)**: Communicate between processes using Channels.
+- **[Non-blocking IO](./how-to/non_blocking_io.md)**: Fetch URLs and read files without blocking.
+- **[Background Tasks](./how-to/background_tasks.md)**: Scale heavy CPU tasks using the WorkerPool.
 
 ## 📚 [Reference](./reference/)
 *Information-oriented technical descriptions.*

@@ -1,3 +1,15 @@
+# Tutorial: Concurrency Basics
+
+In this tutorial, you'll learn the difference between the two primary ways to start a coroutine: `Launch` and `Async`.
+
+## Launch vs Async
+
+- **Launch**: Used for "fire-and-forget" tasks. It returns a `Job` object, but it does not return a result from the task itself.
+- **Async**: Used when you need a result back. It returns a `Deferred` object, and you must call `await()` to get the return value.
+
+## Example Code
+
+```php
 <?php
 
 require_once __DIR__ . '/../../vendor/autoload.php';
@@ -7,13 +19,6 @@ use vosaka\foroutines\RunBlocking;
 use vosaka\foroutines\Launch;
 use vosaka\foroutines\Async;
 use vosaka\foroutines\Delay;
-
-/**
- * Tutorial 02: Concurrency Basics (Launch vs Async)
- * 
- * - Launch: Fire-and-forget. It returns a Job object, but you don't wait for a result.
- * - Async: Returns a result. You use await() to get the return value.
- */
 
 main(function () {
     RunBlocking::new(function () {
@@ -38,3 +43,8 @@ main(function () {
         echo "Task B finished: " . $result . "\n";
     });
 });
+```
+
+## What happened?
+1. `Launch` started Task A and immediately continued to the next line.
+2. `Async` started Task B, but the script stopped at `$deferred->await()` until the result was ready.
