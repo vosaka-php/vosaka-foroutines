@@ -26,3 +26,12 @@ Represents the lifecycle of a coroutine.
 
 ## `Delay::new(int $ms)`
 Suspends the current coroutine for the specified number of milliseconds without blocking the underlying thread/process.
+
+## Dispatchers
+Dispatchers control the execution context of a coroutine.
+
+| Constant | Behavior | Use Case |
+| :--- | :--- | :--- |
+| `Dispatchers::DEFAULT` | Runs in a **Fiber** in the current process. | Fast, non-blocking logic, AsyncIO. |
+| `Dispatchers::IO` | Runs in a **Child Process** via WorkerPool. | Heavy CPU, blocking legacy APIs. |
+| `Dispatchers::MAIN` | Schedules on the next tick of the event loop. | Deferred execution in the same process. |

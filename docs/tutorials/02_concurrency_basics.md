@@ -7,6 +7,12 @@ In this tutorial, you'll learn the difference between the two primary ways to st
 - **Launch**: Used for "fire-and-forget" tasks. It returns a `Job` object, but it does not return a result from the task itself.
 - **Async**: Used when you need a result back. It returns a `Deferred` object, and you must call `await()` to get the return value.
 
+## Understanding Dispatchers
+When you start a coroutine using `Launch` or `Async`, you can specify a **Dispatcher** as the second argument. A Dispatcher determines *where* and *how* the task is executed.
+
+- **DEFAULT** (Implicit): If you don't specify a dispatcher, Foroutines uses the `DEFAULT` dispatcher. This runs the code as a **Fiber** within the same process. It is extremely fast but can't run CPU-blocking code without freezing other fibers.
+- **IO**: Offloads the task to a **separate process** in the `WorkerPool`. This is best for heavy calculations or blocking calls that would otherwise freeze your application.
+
 ## Example Code
 
 ```php

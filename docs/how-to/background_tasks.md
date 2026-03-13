@@ -2,12 +2,13 @@
 
 When a task is CPU-intensive (e.g., heavy math, image processing), it should be offloaded to a `WorkerPool` so it doesn't block the main process.
 
-## WorkerPool Features
-- **Dynamic Scaling**: Automatically spawns new workers under load.
-- **Task Batching**: Groups small tasks together for efficient IPC.
-- **Automatic Respawn**: Restarts workers if they crash.
+## Why use Dispatchers::IO?
+In asynchronous programming, "blocking" is the enemy. If you run a heavy loop inside a standard Fiber (using the **DEFAULT** dispatcher), no other fibers can run until that loop finishes.
+
+The **IO Dispatcher** solves this by sending the task to a **WorkerPool**. Instead of running in your main process, the task runs in a child process managed by the OS. This allows your main process to stay responsive and handle other async IO (like web requests) simultaneously.
 
 ## Implementation Example
+In the example below, notice how we use `Dispatchers::IO` to offload work.
 
 ```php
 <?php
