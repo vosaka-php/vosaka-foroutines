@@ -439,8 +439,8 @@ main(function () {
 
             assert_true($ip !== null, " — dnsResolve should return a result");
             assert_true(
-                filter_var($ip, FILTER_VALIDATE_IP) !== false,
-                " — result should be a valid IP, got: {$ip}",
+                $ip === "127.0.0.1" || $ip === "::1",
+                " — localhost should resolve to loopback, got: {$ip}",
             );
         });
     });
