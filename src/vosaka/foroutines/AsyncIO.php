@@ -530,23 +530,14 @@ final class AsyncIO
     }
 
     /**
-     * Async-friendly DNS resolution.
-     *
-     * PHP's gethostbyname() is blocking. This wraps it in a Fiber-aware
-     * pattern: it yields once before the (potentially slow) DNS lookup
-     * so that other fibers get a chance to run, then performs the lookup.
-     *
-     * For truly non-blocking DNS, consider using Dispatchers::IO to offload
-     * the lookup to a child process.
+     * Async-friendly DNS resolution using UDP (non-blocking).
      *
      * @param string $hostname The hostname to resolve.
      * @return Deferred Resolves to the resolved IP address string.
      */
     public static function dnsResolve(string $hostname): Deferred
     {
-        return new LazyDeferred(static function () use ($hostname): string {
-            return self::doDnsResolve($hostname);
-        });
+        return DnsResolver::resolve($hostname);
     }
 
     /**
@@ -1058,32 +1049,13 @@ final class AsyncIO
     }
 
     /**
-     * @param string $hostname
-     * @return string
-     * @throws RuntimeException
+     * Deprecated: legacy synchronous DNS resolver retained for backward compatibility.
+     * Not used by dnsResolve() anymore; kept to avoid BC breaks for users who may
+     * have referenced it internally.
      */
     private static function doDnsResolve(string $hostname): string
     {
-        // If it's already an IP, return immediately
-        if (filter_var($hostname, FILTER_VALIDATE_IP)) {
-            return $hostname;
-        }
-
-        // Yield once so other fibers can run before the blocking call
-        if (Fiber::getCurrent() !== null) {
-            Pause::new();
-        }
-
-        $ip = gethostbyname($hostname);
-
-        if ($ip === $hostname) {
-            // gethostbyname returns the hostname unchanged on failure
-            throw new RuntimeException(
-                "DNS resolution failed for: {$hostname}",
-            );
-        }
-
-        return $ip;
+        return DnsResolver::resolve($hostname)->await();
     }
 
     // ─── Utilities ───────────────────────────────────────────────────

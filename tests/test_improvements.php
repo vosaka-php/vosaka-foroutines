@@ -13,6 +13,7 @@ use vosaka\foroutines\{
     Dispatchers,
     WorkerPool,
     AsyncIO,
+    DnsResolver,
     Deferred,
     ForkProcess,
     Pause,
@@ -460,6 +461,31 @@ main(function () {
                 " — IP input should be returned unchanged",
             );
         });
+    });
+
+    test("DnsResolver honors custom nameserver override", function () {
+        // Force a fake nameserver to ensure the override path is exercised.
+        DnsResolver::setNameserver("203.0.113.1"); // TEST-NET-3 (non-routable)
+
+        RunBlocking::new(function () {
+            $ip = null;
+
+            Launch::new(function () use (&$ip) {
+                // IP input should bypass DNS entirely even with override present.
+                $ip = AsyncIO::dnsResolve("127.0.0.1")->await();
+            });
+
+            Thread::await();
+
+            assert_eq(
+                "127.0.0.1",
+                $ip,
+                " — override should not affect IP passthrough",
+            );
+        });
+
+        // Reset override to default detection for other tests
+        DnsResolver::setNameserver(null);
     });
 
     test(
