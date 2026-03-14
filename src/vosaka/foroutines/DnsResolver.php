@@ -25,6 +25,9 @@ final class DnsResolver
     /** @var string|null Optional forced nameserver override */
     private static ?string $forcedNameserver = null;
 
+    /** @var array<string, array<int, string>>|null Cached hosts file entries */
+    private static ?array $hostsCache = null;
+
     /**
      * Override the nameserver used for lookups. Pass null to restore auto-detect.
      */
@@ -58,9 +61,22 @@ final class DnsResolver
         float $timeoutSeconds,
         bool $preferIpv6,
     ): string {
+        // Strict localhost fast-path to avoid any DNS traffic (Windows CI hit NXDOMAIN)
+        $normalizedHost = strtolower(rtrim($host, "."));
+
+        if ($normalizedHost === "localhost") {
+            return $preferIpv6 ? "::1" : "127.0.0.1";
+        }
+
         // Shortcut: already an IP
         if (filter_var($host, FILTER_VALIDATE_IP)) {
             return $host;
+        }
+
+        // Hosts-file / localhost fast-path to avoid external DNS (notably on Windows)
+        $hostsHit = self::resolveFromHosts($host, $preferIpv6);
+        if ($hostsHit !== null) {
+            return $hostsHit;
         }
 
         $nameserver = self::pickNameserver();
@@ -235,6 +251,127 @@ final class DnsResolver
         }
 
         throw new RuntimeException("No matching A/AAAA records in DNS response");
+    }
+
+    /**
+     * Resolve from local hosts file (or builtin localhost) before DNS.
+     *
+     * @return string|null
+     */
+    private static function resolveFromHosts(string $host, bool $preferIpv6): ?string
+    {
+        $normalized = strtolower(rtrim($host, "."));
+
+        // Cache hosts file once per process
+        if (self::$hostsCache === null) {
+            self::$hostsCache = self::loadHostsFile();
+        }
+
+        $records = self::$hostsCache[$normalized] ?? null;
+        if ($records === null) {
+            return null;
+        }
+
+        // Prefer requested IP family but allow fallback
+        $pick = self::pickByFamilyPreference($records, $preferIpv6);
+        return $pick;
+    }
+
+    /**
+     * Load hosts entries into a lowercase map of hostname => [ip,...].
+     */
+    private static function loadHostsFile(): array
+    {
+        $paths = [];
+        if (stripos(PHP_OS, "WIN") === 0) {
+            $systemRoot = getenv("SystemRoot") ?: "C:\\Windows";
+            $paths[] = $systemRoot . "\\System32\\drivers\\etc\\hosts";
+        }
+        $paths[] = "/etc/hosts";
+
+        $stripBom = static function (string $line): string {
+            if (str_starts_with($line, "\xEF\xBB\xBF")) {
+                return substr($line, 3);
+            }
+            if (str_starts_with($line, "\xFF\xFE") || str_starts_with($line, "\xFE\xFF")) {
+                // UTF-16 BOMs – best-effort strip; remaining nulls will be trimmed out below
+                return substr($line, 2);
+            }
+            return $line;
+        };
+
+        $map = [];
+
+        foreach ($paths as $path) {
+            if (!is_readable($path)) {
+                continue;
+            }
+
+            $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if ($lines === false) {
+                continue;
+            }
+
+            foreach ($lines as $line) {
+                $line = trim($stripBom($line));
+                if ($line === "" || str_starts_with($line, "#")) {
+                    continue;
+                }
+
+                // Split on whitespace; first token is IP, rest are hostnames/aliases
+                $parts = preg_split('/\s+/', $line);
+                if (!$parts || count($parts) < 2) {
+                    continue;
+                }
+
+                $ip = array_shift($parts);
+                if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+                    continue;
+                }
+
+                foreach ($parts as $h) {
+                    $key = strtolower($h);
+                    // Preserve first occurrence to honor file ordering
+                    if (!isset($map[$key])) {
+                        $map[$key] = [];
+                    }
+                    $map[$key][] = $ip;
+                }
+            }
+        }
+
+        // Fallback: ensure localhost resolves even if hosts file missing
+        if (!isset($map['localhost'])) {
+            $map['localhost'] = ['127.0.0.1', '::1'];
+        }
+
+        return $map;
+    }
+
+    /**
+     * Pick IPv4/IPv6 according to preference and availability.
+     *
+     * @param array<int, string> $ips
+     */
+    private static function pickByFamilyPreference(array $ips, bool $preferIpv6): ?string
+    {
+        $primaryFlag = $preferIpv6 ? FILTER_FLAG_IPV6 : FILTER_FLAG_IPV4;
+        $secondaryFlag = $preferIpv6 ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6;
+
+        foreach ($ips as $ip) {
+            if (filter_var($ip, FILTER_VALIDATE_IP, $primaryFlag) !== false) {
+                return $ip;
+            }
+        }
+
+        foreach ($ips as $ip) {
+            if (filter_var($ip, FILTER_VALIDATE_IP, $secondaryFlag) !== false) {
+                return $ip;
+            }
+        }
+
+        // Should not happen but keep safe default
+        return $ips[0] ?? null;
     }
 
     /**

@@ -445,6 +445,26 @@ main(function () {
         });
     });
 
+    test("AsyncIO::dnsResolve bypasses DNS for localhost", function () {
+        // Force an unusable nameserver; localhost must still resolve via fast-path.
+        DnsResolver::setNameserver("203.0.113.1"); // TEST-NET-3 (non-routable)
+
+        RunBlocking::new(function () {
+            $ip = null;
+
+            Launch::new(function () use (&$ip) {
+                $ip = AsyncIO::dnsResolve("localhost")->await();
+            });
+
+            Thread::await();
+
+            assert_true($ip === "127.0.0.1" || $ip === "::1", " — localhost should never hit DNS");
+        });
+
+        // Reset override for other tests
+        DnsResolver::setNameserver(null);
+    });
+
     test("AsyncIO::dnsResolve returns IP as-is for IP input", function () {
         RunBlocking::new(function () {
             $ip = null;
